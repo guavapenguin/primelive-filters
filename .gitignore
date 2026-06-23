@@ -1,0 +1,10 @@
+# Python venv / 打包產物（勿上傳，太大且可重建）
+.venv/
+__pycache__/
+*.pyc
+*.spec
+build/
+dist/
+
+# 開發暫存預覽
+engine/_panel_preview.png
