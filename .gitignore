@@ -12,3 +12,7 @@ engine/_panel_preview.png
 # 安裝檔大型產物（勿上傳）
 installer/OBS-Studio-Installer.exe
 installer/out/
+
+# 預覽暫存圖
+assets/**/_*.jpg
+assets/stickers/potato_options/

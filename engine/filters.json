@@ -21,6 +21,9 @@
     { "key": "b", "name": "香腸嘴",          "warp": { "eye": 0.0, "mouth": 0.6 } },
     { "key": "e", "name": "哈哈鏡·大眼大嘴", "warp": { "eye": 0.6, "mouth": 0.5 } },
     { "key": "r", "name": "水豚頭+書香",     "sticker": "stickers/h_capybara.png", "anchor": "head", "scale": 1.8, "y_off": -0.12, "background": "backgrounds_1080/01_book_cafe_00001_.png" },
-    { "key": "t", "name": "花圈+美顏",       "sticker": "stickers/s04_flower_crown.png", "anchor": "head", "scale": 1.5, "y_off": -0.50, "beauty": { "smooth": 0.5, "slim": 0.08 }, "lut": "luts/primelive_amb_milktea_warm.cube" }
+    { "key": "t", "name": "花圈+美顏",       "sticker": "stickers/s04_flower_crown.png", "anchor": "head", "scale": 1.5, "y_off": -0.50, "beauty": { "smooth": 0.5, "slim": 0.08 }, "lut": "luts/primelive_amb_milktea_warm.cube" },
+    { "key": "f", "name": "番薯頭",          "sticker": "stickers/h_sweet_potato.png", "anchor": "head", "scale": 1.7, "y_off": -0.12 },
+    { "key": "g", "name": "狐狸面具·不露臉", "sticker": "stickers/h_fox_mask.png",     "anchor": "head", "scale": 1.6, "y_off": -0.05 },
+    { "key": "h", "name": "飯糰頭",          "sticker": "stickers/h_riceball.png",     "anchor": "head", "scale": 1.8, "y_off": -0.12 }
   ]
 }
