@@ -75,6 +75,11 @@ def load_sticker(path):
         im = cv2.imread(path, cv2.IMREAD_UNCHANGED)   # BGRA
         if im is not None and im.shape[2] == 4:
             im = cv2.cvtColor(im, cv2.COLOR_BGRA2RGBA)
+            # 自動裁切到不透明範圍：讓貼圖內容貼齊邊框，縮放/定位才會準
+            a = im[..., 3]
+            ys, xs = np.where(a > 16)
+            if len(xs) > 0:
+                im = im[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
         _stk_cache[path] = im
     return _stk_cache[path]
 
@@ -309,7 +314,8 @@ def main():
         print("[錯誤] 找不到模型 face_landmarker.task，請先依 README「模型」段取得並放到 obs/engine/。")
         sys.exit(2)
 
-    with open(os.path.join(HERE, "filters.json"), "r", encoding="utf-8") as f:
+    filters_path = os.path.join(HERE, "filters.json")
+    with open(filters_path, "r", encoding="utf-8") as f:
         presets = json.load(f)["presets"]
     active = max(0, min(args.preset, len(presets) - 1))
 
@@ -335,12 +341,28 @@ def main():
     else:
         print("[note] 找不到 selfie_segmenter.task，換背景功能停用")
 
-    cap = cv2.VideoCapture(args.camera, cv2.CAP_DSHOW)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.cap_width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.cap_height)
-    ok, frame = cap.read()
-    if not ok:
-        print("[錯誤] 開不了攝影機 index=%d" % args.camera)
+    def open_cam(idx):
+        c = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+        c.set(cv2.CAP_PROP_FRAME_WIDTH, args.cap_width)
+        c.set(cv2.CAP_PROP_FRAME_HEIGHT, args.cap_height)
+        ok, fr = c.read()
+        if ok and fr is not None:
+            return c, fr
+        c.release()
+        return None, None
+
+    cap, frame = open_cam(args.camera)
+    if cap is None:   # 指定的攝影機開不了 → 自動掃描 0~5 找可用的（給別台電腦用）
+        for idx in range(6):
+            if idx == args.camera:
+                continue
+            cap, frame = open_cam(idx)
+            if cap is not None:
+                print("[note] camera %d 開不了，自動改用 camera %d" % (args.camera, idx))
+                args.camera = idx
+                break
+    if cap is None:
+        print("[錯誤] 找不到可用的攝影機。請確認攝影機已接上、沒被其他程式佔用。")
         sys.exit(3)
     H, W = frame.shape[:2]
     print("[ok] 攝影機 %dx%d，濾鏡 %d 個。數字鍵切換，q 離開。" % (W, H, len(presets)))
@@ -435,9 +457,40 @@ def main():
                 k = cv2.waitKey(1) & 0xFF
                 if k == ord("q"):
                     break
-                for i, pr in enumerate(presets):
-                    if k == ord(pr["key"]):
-                        ui["active"] = i
+                elif k in (ord("="), ord("+")) and "scale" in presets[active]:
+                    presets[active]["scale"] = round(presets[active]["scale"] + 0.1, 2)
+                    print("  scale =", presets[active]["scale"])
+                elif k == ord("-") and "scale" in presets[active]:
+                    presets[active]["scale"] = round(presets[active]["scale"] - 0.1, 2)
+                    print("  scale =", presets[active]["scale"])
+                elif k == ord("]") and presets[active].get("anchor") == "head":
+                    presets[active]["y_off"] = round(presets[active].get("y_off", -0.15) + 0.02, 3)
+                    print("  y_off =", presets[active]["y_off"])
+                elif k == ord("[") and presets[active].get("anchor") == "head":
+                    presets[active]["y_off"] = round(presets[active].get("y_off", -0.15) - 0.02, 3)
+                    print("  y_off =", presets[active]["y_off"])
+                elif k == ord("o"):
+                    with open(filters_path, "w", encoding="utf-8") as f:
+                        json.dump({"presets": presets}, f, ensure_ascii=False, indent=2)
+                    print("  已存回 filters.json")
+                elif k == ord("n"):   # 切換到下一個可用攝影機
+                    cap.release()
+                    nxt, newcap = args.camera, None
+                    for _ in range(6):
+                        nxt = (nxt + 1) % 6
+                        newcap, _ = open_cam(nxt)
+                        if newcap is not None:
+                            break
+                    if newcap is not None:
+                        cap, args.camera = newcap, nxt
+                        print("  -> 切換攝影機 camera", nxt)
+                    else:
+                        cap, _ = open_cam(args.camera)
+                        print("  找不到其他攝影機")
+                else:
+                    for i, pr in enumerate(presets):
+                        if k == ord(pr["key"]):
+                            ui["active"] = i
 
             n += 1
             if args.frames and n >= args.frames:

@@ -8,3 +8,7 @@ dist/
 
 # 開發暫存預覽
 engine/_panel_preview.png
+
+# 安裝檔大型產物（勿上傳）
+installer/OBS-Studio-Installer.exe
+installer/out/
