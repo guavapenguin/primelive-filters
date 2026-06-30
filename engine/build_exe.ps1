@@ -6,9 +6,9 @@ $pp = Join-Path $eng ".venv\Scripts\python.exe"
 Write-Host "[1/3] 安裝 PyInstaller..."
 & $pp -m pip install pyinstaller --disable-pip-version-check --no-input
 
-Write-Host "[2/3] 打包（--collect-all mediapipe 收集模型圖檔）..."
+Write-Host "[2/3] 打包（--collect-all mediapipe 收集模型圖檔；含 pygrabber/comtypes 供名稱選鏡頭）..."
 Push-Location $eng
-& $pp -m PyInstaller --noconfirm --onedir --name primelive_filter --collect-all mediapipe primelive_engine.py
+& $pp -m PyInstaller --noconfirm --onedir --name primelive_filter --collect-all mediapipe --collect-all comtypes --hidden-import pygrabber.dshow_graph primelive_engine.py
 Pop-Location
 
 Write-Host "[3/3] 複製模型 / 設定 / 素材到 exe 旁..."

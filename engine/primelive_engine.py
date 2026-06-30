@@ -295,11 +295,52 @@ def build_panel(presets, active, W):
     return _panel_cache[active]
 
 
+# ---------- 鏡頭選擇（用名稱挑 OBSBOT，永不誤開手機/連線相機）----------
+# 索引會隨插拔位移(OBSBOT 曾是 3、後來變 0)，所以改用「名稱」選鏡頭最穩。
+_PHONE_PAT = ("連線相機", "虛擬攝影機", "phone", "手機", "galaxy", "s26", "s25", "s24",
+              "droidcam", "iriun", "camo", "epoccam", "ivcam", "link to windows")
+_PREFER_PAT = ("obsbot tiny",)   # 真實 OBSBOT 實體鏡頭(不是 OBSBOT Virtual)
+
+def list_camera_names():
+    """DirectShow 鏡頭名稱清單(索引與 cv2 CAP_DSHOW 一致)；取不到回 None。只列名、不開鏡頭。"""
+    try:
+        from pygrabber.dshow_graph import FilterGraph
+        return list(FilterGraph().get_input_devices())
+    except Exception:
+        return None
+
+def _is_phone(name):
+    n = (name or "").lower()
+    return any(p in n for p in _PHONE_PAT)
+
+def pick_camera_index(names, prefer=None):
+    """依名稱挑鏡頭：①指定關鍵字 ②OBSBOT 實體 ③第一個非手機非虛擬 ④第一個非手機。
+    回傳 (index, name)；無法判斷回 (None, None)。"""
+    if not names:
+        return None, None
+    if prefer:
+        for i, n in enumerate(names):
+            if prefer.lower() in n.lower() and not _is_phone(n):
+                return i, n
+    for i, n in enumerate(names):
+        if any(p in n.lower() for p in _PREFER_PAT):
+            return i, n
+    for i, n in enumerate(names):
+        if not _is_phone(n) and "virtual" not in n.lower():
+            return i, n
+    for i, n in enumerate(names):
+        if not _is_phone(n):
+            return i, n
+    return None, None
+
+
 # ---------- 主程式 ----------
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--camera", type=int, default=3)  # 本機 cam 3 = OBSBOT(可用 --camera 覆蓋)
+    ap.add_argument("--camera", type=int, default=-1, help="指定鏡頭索引；預設 -1=依名稱自動選 OBSBOT")
+    ap.add_argument("--camera-name", default="OBSBOT Tiny", help="自動選鏡頭時優先比對的名稱關鍵字")
+    ap.add_argument("--list-cameras", action="store_true", help="列出所有鏡頭名稱後結束(不開鏡頭)")
     ap.add_argument("--frames", type=int, default=0, help="只跑 N 格就結束(煙霧測試)")
     ap.add_argument("--no-window", action="store_true")
     ap.add_argument("--preset", type=int, default=0, help="起始濾鏡索引(0-based)")
@@ -310,6 +351,19 @@ def main():
     args = ap.parse_args()
     if args.fast:
         args.cap_width, args.cap_height = 960, 540
+
+    if args.list_cameras:
+        names = list_camera_names()
+        if names is None:
+            print("[note] 無法列舉鏡頭名稱(缺 pygrabber)。安裝：pip install pygrabber")
+        else:
+            print("=== 鏡頭清單(索引與 --camera 一致) ===")
+            for i, n in enumerate(names):
+                print("   %d: %s%s" % (i, n, "   <- 手機/連線相機，會自動略過" if _is_phone(n) else ""))
+            idx, nm = pick_camera_index(names, args.camera_name)
+            if idx is not None:
+                print("自動會選用 -> %d: %s" % (idx, nm))
+        return
 
     import mediapipe as mp
     from mediapipe.tasks import python as mp_python
@@ -356,18 +410,37 @@ def main():
         c.release()
         return None, None
 
-    cap, frame = open_cam(args.camera)
-    if cap is None:   # 指定的攝影機開不了 → 自動掃描 0~5 找可用的（給別台電腦用）
-        for idx in range(6):
-            if idx == args.camera:
+    cam_names = list_camera_names()
+    if cam_names:
+        print("[鏡頭] " + " | ".join("%d:%s" % (i, n) for i, n in enumerate(cam_names)))
+
+    # 決定主鏡頭：使用者指定索引優先(但若指到手機則改自動)，否則依名稱選 OBSBOT
+    target = args.camera
+    if target is not None and target >= 0 and cam_names and target < len(cam_names) and _is_phone(cam_names[target]):
+        print("[警告] 指定的 camera %d 是手機(%s)，改自動選 OBSBOT 以免連手機" % (target, cam_names[target]))
+        target = -1
+    if target is None or target < 0:
+        idx, nm = pick_camera_index(cam_names, args.camera_name)
+        target = idx if idx is not None else 0
+        if nm:
+            print("[ok] 自動選用鏡頭 %d：%s" % (target, nm))
+    args.camera = target
+
+    cap, frame = open_cam(target)
+    if cap is None:   # 主鏡頭開不了 → 掃描其他可用鏡頭，但永遠跳過手機/連線相機
+        scan_n = len(cam_names) if cam_names else 6
+        for idx in range(scan_n):
+            if idx == target:
+                continue
+            if cam_names and _is_phone(cam_names[idx]):
                 continue
             cap, frame = open_cam(idx)
             if cap is not None:
-                print("[note] camera %d 開不了，自動改用 camera %d" % (args.camera, idx))
+                print("[note] 鏡頭 %d 開不了，自動改用鏡頭 %d" % (target, idx))
                 args.camera = idx
                 break
     if cap is None:
-        print("[錯誤] 找不到可用的攝影機。請確認攝影機已接上、沒被其他程式佔用。")
+        print("[錯誤] 找不到可用的攝影機。請確認 OBSBOT 已接上、沒被其他程式佔用。")
         sys.exit(3)
     H, W = frame.shape[:2]
     print("[ok] 攝影機 %dx%d，濾鏡 %d 個。數字鍵切換，q 離開。" % (W, H, len(presets)))
@@ -478,11 +551,13 @@ def main():
                     with open(filters_path, "w", encoding="utf-8") as f:
                         json.dump({"presets": presets}, f, ensure_ascii=False, indent=2)
                     print("  已存回 filters.json")
-                elif k == ord("n"):   # 切換到下一個可用攝影機
+                elif k == ord("n"):   # 切換到下一個可用攝影機(永遠跳過手機/連線相機)
                     cap.release()
                     nxt, newcap = args.camera, None
                     for _ in range(6):
                         nxt = (nxt + 1) % 6
+                        if cam_names and nxt < len(cam_names) and _is_phone(cam_names[nxt]):
+                            continue
                         newcap, _ = open_cam(nxt)
                         if newcap is not None:
                             break
