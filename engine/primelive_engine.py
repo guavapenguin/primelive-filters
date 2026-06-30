@@ -20,7 +20,15 @@ import numpy as np
 import cv2
 from PIL import Image as PILImage, ImageDraw as PILDraw, ImageFont as PILFont
 
-# Windows 主控台預設 cp950，改成 utf-8 才能印中文與特殊符號
+# Windows 主控台預設 cp950：先把主控台輸出碼頁設成 UTF-8（.exe 直接跑或啟動 .bat
+# 跑時中文都不亂碼，.bat 也不必再 chcp——避免 chcp 切碼頁造成批次檔解析錯位），
+# 再把 Python stdout 改成 utf-8。
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+    except Exception:
+        pass
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -174,26 +182,159 @@ def slim_face(rgb, pts, strength):
     out[Y0:Y1, X0:X1] = warped
     return out
 
-def apply_beauty(rgb, lms, smooth=0.5, slim=0.0):
+# ---- 臉部關鍵點分組（MediaPipe FaceMesh 468/478 標準索引）----
+LIPS_OUTER = [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146]
+LIPS_INNER = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95]
+R_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]   # 影像左＝主角右眼
+L_EYE = [263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466]  # 影像右＝主角左眼
+R_EYE_OUTER, L_EYE_OUTER = 33, 263     # 眼尾外角（魚尾紋起點）
+R_EYE_BOT, L_EYE_BOT = 145, 374        # 眼睛下緣（眼下提亮錨點）
+CHEEK_R, CHEEK_L = 50, 280             # 兩頰顴骨（腮紅）
+
+def _ipts(lms, idx, W, H):
+    return np.array([[lms[i].x * W, lms[i].y * H] for i in idx], np.float32)
+
+def _roi_box(pts, W, H, pad_frac, base):
+    x, y, w, h = cv2.boundingRect(pts.astype(np.int32))
+    pad = int(pad_frac * base)
+    return max(0, x - pad), max(0, y - pad), min(W, x + w + pad), min(H, y + h + pad)
+
+def _recolor_roi(roi, lmask, color, strength):
+    """保亮度上色：保留原本明暗/紋理，只把色相換成 color（唇彩、腮紅共用）。"""
+    f = roi.astype(np.float32)
+    lum = f @ np.array([0.299, 0.587, 0.114], np.float32)
+    cl = max(1.0, float(color[0]) * 0.299 + float(color[1]) * 0.587 + float(color[2]) * 0.114)
+    tinted = np.clip(lum[..., None] * (np.array(color, np.float32) / cl), 0, 255)
+    a = np.clip(lmask * strength, 0, 1)[..., None]
+    return (f * (1 - a) + tinted * a).astype(np.uint8)
+
+def _smooth_region(roi, lmask, d=11, s=60):
+    """區域保邊柔化（魚尾紋/細紋用，比全臉磨皮更強）。"""
+    sm = cv2.bilateralFilter(roi, d, s, s)
+    a = np.clip(lmask, 0, 1)[..., None]
+    return (roi.astype(np.float32) * (1 - a) + sm.astype(np.float32) * a).astype(np.uint8)
+
+def apply_beauty(rgb, lms, params):
+    """化妝管線。params 可含：
+       smooth 磨皮、wrinkle 魚尾紋/眼下細紋、brighten_eyes 亮眼、
+       lipstick[r,g,b]+lip_strength 唇彩、blush[r,g,b]+blush_strength 腮紅、
+       contour 修容、slim 瘦臉。缺哪個鍵＝該效果關閉，向後相容舊 preset。"""
+    if not isinstance(params, dict):
+        params = {"smooth": float(params)}
     H, W = rgb.shape[:2]
     pts = _face_pts(lms, W, H)
-    out = rgb
-    if slim > 0:
-        out = slim_face(out, pts, slim)
+    face_w = float(pts[:, 0].max() - pts[:, 0].min())
+    cxf = float(pts[:, 0].mean())
+    out = rgb.copy()
+
+    smooth = float(params.get("smooth", 0.0))
+    wrinkle = float(params.get("wrinkle", 0.0))
+    brighten = float(params.get("brighten_eyes", 0.0))
+    contour = float(params.get("contour", 0.0))
+    slim = float(params.get("slim", 0.0))
+
+    # 1) 全臉磨皮（保邊雙邊濾波，遮罩限制在臉部凸包）
     if smooth > 0:
         x, y, wf, hf = cv2.boundingRect(pts.astype(np.int32))
         pad = int(0.15 * max(wf, hf))
         X0, Y0 = max(0, x - pad), max(0, y - pad)
         X1, Y1 = min(W, x + wf + pad), min(H, y + hf + pad)
         if X1 > X0 and Y1 > Y0:
+            m = np.zeros((Y1 - Y0, X1 - X0), np.float32)
+            cv2.fillConvexPoly(m, cv2.convexHull((pts - [X0, Y0]).astype(np.int32)), 1.0)
+            m = cv2.GaussianBlur(m, (0, 0), 8.0) * smooth
+            out[Y0:Y1, X0:X1] = _smooth_region(out[Y0:Y1, X0:X1], m, d=9, s=45)
+
+    # 2) 魚尾紋 / 眼下細紋（眼尾外側橢圓，強柔化；挖掉眼睛本體避免糊到眼睛）
+    #    wrinkle 越高→sigma 越大、>0.85 做兩道保邊柔化，讓深一點的魚尾紋也抹得掉。
+    if wrinkle > 0:
+        w = float(wrinkle)
+        sigma = int(70 + 60 * min(1.0, w))     # 70..130
+        passes = 2 if w > 0.85 else 1
+        for outer_i, eye_idx, sgn in ((R_EYE_OUTER, R_EYE, -1), (L_EYE_OUTER, L_EYE, +1)):
+            ox, oy = lms[outer_i].x * W, lms[outer_i].y * H
+            cx = ox + sgn * face_w * 0.05
+            cy = oy + face_w * 0.03
+            rx, ry = face_w * 0.13, face_w * 0.10
+            X0, Y0 = int(max(0, cx - rx)), int(max(0, cy - ry))
+            X1, Y1 = int(min(W, cx + rx)), int(min(H, cy + ry))
+            if X1 <= X0 or Y1 <= Y0:
+                continue
+            m = np.zeros((Y1 - Y0, X1 - X0), np.float32)
+            cv2.ellipse(m, (int(cx - X0), int(cy - Y0)), (int(rx), int(ry)), 0, 0, 360, 1.0, -1)
+            cv2.fillConvexPoly(m, cv2.convexHull((_ipts(lms, eye_idx, W, H) - [X0, Y0]).astype(np.int32)), 0.0)
+            m = cv2.GaussianBlur(m, (0, 0), 4.0) * min(1.0, w)
             roi = out[Y0:Y1, X0:X1]
-            sm = cv2.bilateralFilter(roi, 9, 45, 45)
-            mask = np.zeros((Y1 - Y0, X1 - X0), np.float32)
-            hull = cv2.convexHull((pts - [X0, Y0]).astype(np.int32))
-            cv2.fillConvexPoly(mask, hull, 1.0)
-            mask = (cv2.GaussianBlur(mask, (0, 0), 8.0) * smooth)[..., None]
-            out = out.copy()
-            out[Y0:Y1, X0:X1] = (roi.astype(np.float32) * (1 - mask) + sm.astype(np.float32) * mask).astype(np.uint8)
+            sm = roi
+            for _ in range(passes):
+                sm = cv2.bilateralFilter(sm, 13, sigma, sigma)
+            a = np.clip(m, 0, 1)[..., None]
+            out[Y0:Y1, X0:X1] = (roi.astype(np.float32) * (1 - a) + sm.astype(np.float32) * a).astype(np.uint8)
+
+    # 3) 亮眼（眼下提亮，淡化黑眼圈與殘餘細紋陰影）
+    if brighten > 0:
+        for bot_i in (R_EYE_BOT, L_EYE_BOT):
+            cx, cy = lms[bot_i].x * W, lms[bot_i].y * H + face_w * 0.05
+            rx, ry = face_w * 0.10, face_w * 0.06
+            X0, Y0 = int(max(0, cx - rx)), int(max(0, cy - ry))
+            X1, Y1 = int(min(W, cx + rx)), int(min(H, cy + ry))
+            if X1 <= X0 or Y1 <= Y0:
+                continue
+            m = np.zeros((Y1 - Y0, X1 - X0), np.float32)
+            cv2.ellipse(m, (int(cx - X0), int(cy - Y0)), (int(rx), int(ry)), 0, 0, 360, 1.0, -1)
+            m = cv2.GaussianBlur(m, (0, 0), 6.0) * brighten
+            roi = out[Y0:Y1, X0:X1].astype(np.float32)
+            out[Y0:Y1, X0:X1] = np.clip(roi + (28.0 * m)[..., None], 0, 255).astype(np.uint8)
+
+    # 4) 唇彩（外唇減內唇＝不上到牙齒/口腔；保亮度上色）
+    if params.get("lipstick"):
+        outer = _ipts(lms, LIPS_OUTER, W, H)
+        inner = _ipts(lms, LIPS_INNER, W, H)
+        X0, Y0, X1, Y1 = _roi_box(outer, W, H, 0.18, face_w)
+        if X1 > X0 and Y1 > Y0:
+            m = np.zeros((Y1 - Y0, X1 - X0), np.float32)
+            cv2.fillPoly(m, [(outer - [X0, Y0]).astype(np.int32)], 1.0)
+            cv2.fillPoly(m, [(inner - [X0, Y0]).astype(np.int32)], 0.0)
+            m = cv2.GaussianBlur(m, (0, 0), 2.0)
+            out[Y0:Y1, X0:X1] = _recolor_roi(out[Y0:Y1, X0:X1], m, params["lipstick"], float(params.get("lip_strength", 0.5)))
+
+    # 5) 腮紅（兩頰顴骨柔邊橢圓，保亮度上色＝不蓋掉膚質）
+    if params.get("blush"):
+        rx, ry = face_w * 0.15, face_w * 0.12
+        pad = int(rx)   # ROI 留邊，讓高斯羽化能在框內完整淡出 → 不會出現方形硬邊
+        for ci in (CHEEK_R, CHEEK_L):
+            cx = lms[ci].x * W
+            cy = lms[ci].y * H - face_w * 0.02   # 略往顴骨上提，貼近真實腮紅位置
+            X0, Y0 = int(max(0, cx - rx - pad)), int(max(0, cy - ry - pad))
+            X1, Y1 = int(min(W, cx + rx + pad)), int(min(H, cy + ry + pad))
+            if X1 <= X0 or Y1 <= Y0:
+                continue
+            m = np.zeros((Y1 - Y0, X1 - X0), np.float32)
+            cv2.ellipse(m, (int(cx - X0), int(cy - Y0)), (int(rx), int(ry)), 0, 0, 360, 1.0, -1)
+            m = cv2.GaussianBlur(m, (0, 0), rx * 0.7)
+            out[Y0:Y1, X0:X1] = _recolor_roi(out[Y0:Y1, X0:X1], m, params["blush"], float(params.get("blush_strength", 0.2)))
+
+    # 6) 修容（臉部外側 ~45% 壓暗，做出收窄陰影；限中下半臉避免額頭/太陽穴變髒）
+    if contour > 0:
+        x, y, wf, hf = cv2.boundingRect(pts.astype(np.int32))
+        pad = int(0.05 * max(wf, hf))
+        X0, Y0 = max(0, x - pad), max(0, y - pad)
+        X1, Y1 = min(W, x + wf + pad), min(H, y + hf + pad)
+        if X1 > X0 and Y1 > Y0:
+            mface = np.zeros((Y1 - Y0, X1 - X0), np.float32)
+            cv2.fillConvexPoly(mface, cv2.convexHull((pts - [X0, Y0]).astype(np.int32)), 1.0)
+            mface = cv2.GaussianBlur(mface, (0, 0), 5.0)
+            ys, xs = np.mgrid[Y0:Y1, X0:X1].astype(np.float32)
+            lat = np.clip((np.abs(xs - cxf) / max(1.0, wf * 0.5) - 0.55) / 0.45, 0.0, 1.0)
+            ymin = float(pts[:, 1].min())
+            vw = np.clip((ys - (ymin + hf * 0.30)) / max(1.0, hf * 0.5), 0.0, 1.0)
+            m = mface * lat * vw * contour
+            roi = out[Y0:Y1, X0:X1].astype(np.float32)
+            out[Y0:Y1, X0:X1] = (roi * (1 - 0.30 * m[..., None])).astype(np.uint8)
+
+    # 7) 瘦臉（幾何 warp，最後做，讓上面所有妝感一起跟著變形）
+    if slim > 0:
+        out = slim_face(out, pts, slim)
     return out
 
 
@@ -313,14 +454,14 @@ def _is_phone(name):
     n = (name or "").lower()
     return any(p in n for p in _PHONE_PAT)
 
-def pick_camera_index(names, prefer=None):
-    """依名稱挑鏡頭：①指定關鍵字 ②OBSBOT 實體 ③第一個非手機非虛擬 ④第一個非手機。
+def pick_camera_index(names, prefer=None, allow_phone=False):
+    """依名稱挑鏡頭：①指定關鍵字 ②OBSBOT 實體 ③第一個非手機非虛擬 ④第一個非手機 ⑤(允許時)手機。
     回傳 (index, name)；無法判斷回 (None, None)。"""
     if not names:
         return None, None
     if prefer:
         for i, n in enumerate(names):
-            if prefer.lower() in n.lower() and not _is_phone(n):
+            if prefer.lower() in n.lower() and (allow_phone or not _is_phone(n)):
                 return i, n
     for i, n in enumerate(names):
         if any(p in n.lower() for p in _PREFER_PAT):
@@ -331,6 +472,10 @@ def pick_camera_index(names, prefer=None):
     for i, n in enumerate(names):
         if not _is_phone(n):
             return i, n
+    if allow_phone:           # 都沒有(只剩手機) → 允許時就用手機
+        for i, n in enumerate(names):
+            if _is_phone(n):
+                return i, n
     return None, None
 
 
@@ -340,6 +485,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--camera", type=int, default=-1, help="指定鏡頭索引；預設 -1=依名稱自動選 OBSBOT")
     ap.add_argument("--camera-name", default="OBSBOT Tiny", help="自動選鏡頭時優先比對的名稱關鍵字")
+    ap.add_argument("--allow-phone", action="store_true", help="允許使用手機/連線相機(預設一律跳過手機)")
     ap.add_argument("--list-cameras", action="store_true", help="列出所有鏡頭名稱後結束(不開鏡頭)")
     ap.add_argument("--frames", type=int, default=0, help="只跑 N 格就結束(煙霧測試)")
     ap.add_argument("--no-window", action="store_true")
@@ -360,7 +506,7 @@ def main():
             print("=== 鏡頭清單(索引與 --camera 一致) ===")
             for i, n in enumerate(names):
                 print("   %d: %s%s" % (i, n, "   <- 手機/連線相機，會自動略過" if _is_phone(n) else ""))
-            idx, nm = pick_camera_index(names, args.camera_name)
+            idx, nm = pick_camera_index(names, args.camera_name, allow_phone=args.allow_phone)
             if idx is not None:
                 print("自動會選用 -> %d: %s" % (idx, nm))
         return
@@ -417,22 +563,34 @@ def main():
     # 決定主鏡頭：使用者指定索引優先(但若指到手機則改自動)，否則依名稱選 OBSBOT
     target = args.camera
     if target is not None and target >= 0 and cam_names and target < len(cam_names) and _is_phone(cam_names[target]):
-        print("[警告] 指定的 camera %d 是手機(%s)，改自動選 OBSBOT 以免連手機" % (target, cam_names[target]))
-        target = -1
+        if args.allow_phone:
+            print("[note] 使用手機/連線相機：%s" % cam_names[target])
+        else:
+            print("[警告] 指定的 camera %d 是手機(%s)，改自動選 OBSBOT(要用手機請加 --allow-phone)" % (target, cam_names[target]))
+            target = -1
     if target is None or target < 0:
-        idx, nm = pick_camera_index(cam_names, args.camera_name)
+        idx, nm = pick_camera_index(cam_names, args.camera_name, allow_phone=args.allow_phone)
         target = idx if idx is not None else 0
         if nm:
             print("[ok] 自動選用鏡頭 %d：%s" % (target, nm))
     args.camera = target
 
     cap, frame = open_cam(target)
+    if cap is None and args.allow_phone:
+        # 手機/連線相機可能要幾秒才連上(手機需按「允許」) → 多等幾次再放棄，避免誤退回 OBSBOT
+        print("[note] 等待手機/連線相機連上(請在手機上允許使用相機)...")
+        for _ in range(10):
+            time.sleep(1.0)
+            cap, frame = open_cam(target)
+            if cap is not None:
+                print("[ok] 手機鏡頭已連上")
+                break
     if cap is None:   # 主鏡頭開不了 → 掃描其他可用鏡頭，但永遠跳過手機/連線相機
         scan_n = len(cam_names) if cam_names else 6
         for idx in range(scan_n):
             if idx == target:
                 continue
-            if cam_names and _is_phone(cam_names[idx]):
+            if cam_names and _is_phone(cam_names[idx]) and not args.allow_phone:
                 continue
             cap, frame = open_cam(idx)
             if cap is not None:
@@ -500,10 +658,9 @@ def main():
                     m3, bg_pre = seg_state
                     out = (out.astype(np.float32) * m3 + bg_pre).astype(np.uint8)
 
-            # 2) 美顏（磨皮 + 瘦臉）
+            # 2) 美顏（磨皮 + 瘦臉 + 化妝：魚尾紋/亮眼/唇彩/腮紅/修容）
             if p.get("beauty") and lms is not None:
-                b = p["beauty"]
-                out = apply_beauty(out, lms, float(b.get("smooth", 0.5)), float(b.get("slim", 0.0)))
+                out = apply_beauty(out, lms, p["beauty"])
 
             # 2.5) 搞笑變形（大眼 / 大嘴）
             if p.get("warp") and lms is not None:
@@ -556,7 +713,7 @@ def main():
                     nxt, newcap = args.camera, None
                     for _ in range(6):
                         nxt = (nxt + 1) % 6
-                        if cam_names and nxt < len(cam_names) and _is_phone(cam_names[nxt]):
+                        if cam_names and nxt < len(cam_names) and _is_phone(cam_names[nxt]) and not args.allow_phone:
                             continue
                         newcap, _ = open_cam(nxt)
                         if newcap is not None:

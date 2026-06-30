@@ -1,6 +1,5 @@
 @echo off
-chcp 65001 >nul
 cd /d "%~dp0"
-echo primelive ä¸€éµæ¿¾é¡å¼•æ“ å•Ÿå‹•ä¸­...
+echo primelive ¤@ÁäÂoÃè¤ŞÀº ±Ò°Ê¤¤...
 ".venv\Scripts\python.exe" primelive_engine.py %*
 if errorlevel 1 pause

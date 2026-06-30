@@ -1,5 +1,5 @@
 {
-  "_comment": "primelive 引擎濾鏡預設。anchor=head 的貼圖可在預覽窗用 = - 調大小、[ ] 調高低、o 存檔。",
+  "_comment": "primelive 引擎濾鏡預設。anchor=head 的貼圖可在預覽窗用 = - 調大小、[ ] 調高低、o 存檔。beauty 子鍵：smooth 磨皮 / slim 瘦臉 / wrinkle 魚尾紋眼下細紋 / brighten_eyes 亮眼 / lipstick[r,g,b]+lip_strength 唇彩 / blush[r,g,b]+blush_strength 腮紅 / contour 修容。",
   "presets": [
     { "key": "1", "name": "原始",        "lut": null,                                     "sticker": null, "background": null, "beauty": null },
     { "key": "2", "name": "奶茶暖陽",    "lut": "luts/primelive_amb_milktea_warm.cube",   "sticker": null, "background": null, "beauty": null },
@@ -11,9 +11,20 @@
     { "key": "8", "name": "換背景·童話森林",   "background": "backgrounds_1080/12_fairytale_forest_00001_.png", "lut": "luts/primelive_amb_fairytale_soft.cube" },
     { "key": "9", "name": "換背景·植栽溫室",   "background": "backgrounds_1080/06_greenhouse_00001_.png" },
     { "key": "0", "name": "換背景·星空陽台",   "background": "backgrounds_1080/07_balcony_night_00001_.png",    "lut": "luts/primelive_amb_night_lamp.cube" },
-    { "key": "a", "name": "自然美顏",        "beauty": { "smooth": 0.55, "slim": 0.10 }, "lut": "luts/primelive_amb_jp_fresh.cube" },
-    { "key": "s", "name": "美顏+奶茶",       "beauty": { "smooth": 0.60, "slim": 0.12 }, "lut": "luts/primelive_amb_milktea_warm.cube" },
-    { "key": "d", "name": "美顏·書香咖啡廳", "beauty": { "smooth": 0.55, "slim": 0.10 }, "background": "backgrounds_1080/01_book_cafe_00001_.png", "lut": "luts/primelive_amb_milktea_warm.cube" },
+    { "key": "u", "name": "換背景·青瓷窗景",   "background": "ba.png",                                          "lut": "luts/primelive_amb_jp_fresh.cube" },
+
+    { "key": "a", "name": "自然美顏",        "beauty": { "smooth": 0.5, "slim": 0.08, "wrinkle": 0.6, "brighten_eyes": 0.2, "lipstick": [180, 105, 110], "lip_strength": 0.28, "blush": [236, 152, 158], "blush_strength": 0.12 }, "lut": "luts/primelive_amb_jp_fresh.cube" },
+    { "key": "s", "name": "美顏+奶茶",       "beauty": { "smooth": 0.55, "slim": 0.1, "wrinkle": 0.65, "brighten_eyes": 0.22, "lipstick": [170, 92, 98], "lip_strength": 0.35, "blush": [234, 144, 152], "blush_strength": 0.16 }, "lut": "luts/primelive_amb_milktea_warm.cube" },
+    { "key": "d", "name": "美顏·書香咖啡廳", "beauty": { "smooth": 0.55, "slim": 0.1, "wrinkle": 0.7, "brighten_eyes": 0.25 }, "background": "backgrounds_1080/01_book_cafe_00001_.png", "lut": "luts/primelive_amb_milktea_warm.cube" },
+
+    { "key": "i", "name": "精緻全妝",        "beauty": { "smooth": 0.55, "slim": 0.12, "wrinkle": 0.8, "brighten_eyes": 0.28, "lipstick": [160, 80, 92], "lip_strength": 0.5, "blush": [232, 138, 150], "blush_strength": 0.2, "contour": 0.18 }, "lut": "luts/primelive_amb_jp_fresh.cube" },
+    { "key": "j", "name": "魚尾紋淡化·裸妝", "beauty": { "smooth": 0.5, "slim": 0.06, "wrinkle": 0.95, "brighten_eyes": 0.35, "lipstick": [185, 110, 112], "lip_strength": 0.22, "blush": [236, 152, 158], "blush_strength": 0.1 }, "lut": "luts/primelive_amb_jp_fresh.cube" },
+    { "key": "k", "name": "豆沙霧唇妝",      "beauty": { "smooth": 0.55, "slim": 0.12, "wrinkle": 0.8, "brighten_eyes": 0.28, "lipstick": [150, 98, 100], "lip_strength": 0.55, "blush": [225, 150, 150], "blush_strength": 0.18, "contour": 0.15 }, "lut": "luts/primelive_amb_milktea_warm.cube" },
+    { "key": "l", "name": "蜜桃甜心妝",      "beauty": { "smooth": 0.55, "slim": 0.12, "wrinkle": 0.8, "brighten_eyes": 0.3, "lipstick": [205, 112, 100], "lip_strength": 0.5, "blush": [240, 158, 138], "blush_strength": 0.24 }, "lut": "luts/primelive_amb_milktea_warm.cube" },
+    { "key": "m", "name": "精緻濃妝",        "beauty": { "smooth": 0.65, "slim": 0.18, "wrinkle": 0.9, "brighten_eyes": 0.35, "lipstick": [150, 58, 78], "lip_strength": 0.62, "blush": [230, 118, 140], "blush_strength": 0.26, "contour": 0.28 }, "lut": "luts/primelive_amb_fairytale_soft.cube" },
+    { "key": "p", "name": "全妝·書香咖啡廳", "beauty": { "smooth": 0.55, "slim": 0.12, "wrinkle": 0.8, "brighten_eyes": 0.28, "lipstick": [160, 84, 94], "lip_strength": 0.48, "blush": [232, 140, 150], "blush_strength": 0.2, "contour": 0.16 }, "background": "backgrounds_1080/01_book_cafe_00001_.png", "lut": "luts/primelive_amb_milktea_warm.cube" },
+    { "key": "y", "name": "零魚尾紋·專屬妝",  "beauty": { "smooth": 0.58, "slim": 0.1, "wrinkle": 1.1, "brighten_eyes": 0.4, "lipstick": [158, 92, 96], "lip_strength": 0.45, "blush": [232, 142, 152], "blush_strength": 0.18, "contour": 0.16 }, "lut": "luts/primelive_amb_jp_fresh.cube" },
+
     { "key": "z", "name": "水豚頭",          "sticker": "stickers/h_capybara.png", "anchor": "head", "scale": 1.8, "y_off": -0.12 },
     { "key": "x", "name": "白熊分身·不露臉", "sticker": "stickers/h_avatar.png",   "anchor": "head", "scale": 1.8, "y_off": -0.12, "lipsync": { "y": 0.60, "w": 0.16 } },
     { "key": "c", "name": "粉紅雙馬尾",      "sticker": "stickers/s06_heart_clips.png", "anchor": "head", "scale": 1.95, "y_off": -0.22 },
@@ -21,7 +32,7 @@
     { "key": "b", "name": "香腸嘴",          "warp": { "eye": 0.0, "mouth": 0.6 } },
     { "key": "e", "name": "哈哈鏡·大眼大嘴", "warp": { "eye": 0.6, "mouth": 0.5 } },
     { "key": "r", "name": "水豚頭+書香",     "sticker": "stickers/h_capybara.png", "anchor": "head", "scale": 1.8, "y_off": -0.12, "background": "backgrounds_1080/01_book_cafe_00001_.png" },
-    { "key": "t", "name": "花圈+美顏",       "sticker": "stickers/s04_flower_crown.png", "anchor": "head", "scale": 1.5, "y_off": -0.50, "beauty": { "smooth": 0.5, "slim": 0.08 }, "lut": "luts/primelive_amb_milktea_warm.cube" },
+    { "key": "t", "name": "花圈+美顏",       "sticker": "stickers/s04_flower_crown.png", "anchor": "head", "scale": 1.5, "y_off": -0.50, "beauty": { "smooth": 0.5, "slim": 0.08, "wrinkle": 0.65, "brighten_eyes": 0.22 }, "lut": "luts/primelive_amb_milktea_warm.cube" },
     { "key": "f", "name": "馬鈴薯頭",        "sticker": "stickers/h_sweet_potato.png", "anchor": "head", "scale": 1.7, "y_off": -0.12 },
     { "key": "g", "name": "狐狸面具·不露臉", "sticker": "stickers/h_fox_mask.png",     "anchor": "head", "scale": 1.6, "y_off": -0.05 },
     { "key": "h", "name": "飯糰頭",          "sticker": "stickers/h_riceball.png",     "anchor": "head", "scale": 1.8, "y_off": -0.12 }
