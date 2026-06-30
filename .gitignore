@@ -16,3 +16,6 @@ installer/out/
 # 預覽暫存圖
 assets/**/_*.jpg
 assets/stickers/potato_options/
+
+# 素材替換的本機備份（勿上傳）
+assets/stickers/_backup_*.png

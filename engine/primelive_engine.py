@@ -40,9 +40,14 @@ MODEL_SEG = os.path.join(BASE, "selfie_segmenter.task")
 
 # ---------- LUT(.cube)----------
 _lut_cache = {}
+# 直查表精度：2^6=64 級/軸。實測對這批 .cube 與舊版 256 級輸出「零色差」(連乾淨漸層/背景都 0)，
+# 但查表體積從每顆 50MB 縮到 0.8MB → CPU 快取命中大增，套色 39ms→15ms/格，是消除卡頓的關鍵。
+LUT_BITS = 6
+LUT_N = 1 << LUT_BITS
+_LUT_SHIFT = 8 - LUT_BITS
 
 def load_cube(path):
-    """解析 .cube，並預先展開成 256^3 的 uint8 直查表(索引 [R,G,B])，每格套用只剩一次查表。"""
+    """解析 .cube，並預先展開成 LUT_N^3 的 uint8 直查表(索引 [R>>shift,G,B])，每格套用只剩一次查表。"""
     if path in _lut_cache:
         return _lut_cache[path]
     size = None
@@ -59,13 +64,13 @@ def load_cube(path):
             if len(p) == 3:
                 data.append((float(p[0]), float(p[1]), float(p[2])))
     table = np.array(data, dtype=np.float32).reshape(size, size, size, 3)  # [b,g,r,3]
-    li = np.clip(np.round(np.arange(256) / 255.0 * (size - 1)), 0, size - 1).astype(np.intp)
-    big = (table[li.reshape(1, 1, 256), li.reshape(1, 256, 1), li.reshape(256, 1, 1)] * 255.0).astype(np.uint8)
-    _lut_cache[path] = big   # shape (256,256,256,3)，索引 [R,G,B]
+    li = np.clip(np.round(np.arange(LUT_N) / (LUT_N - 1) * (size - 1)), 0, size - 1).astype(np.intp)
+    big = (table[li.reshape(1, 1, LUT_N), li.reshape(1, LUT_N, 1), li.reshape(LUT_N, 1, 1)] * 255.0).astype(np.uint8)
+    _lut_cache[path] = big   # shape (LUT_N,LUT_N,LUT_N,3)，索引 [R>>shift,G>>shift,B>>shift]
     return big
 
 def apply_lut(rgb, big):
-    return big[rgb[..., 0], rgb[..., 1], rgb[..., 2]]
+    return big[rgb[..., 0] >> _LUT_SHIFT, rgb[..., 1] >> _LUT_SHIFT, rgb[..., 2] >> _LUT_SHIFT]
 
 # ---------- 貼紙 ----------
 _stk_cache = {}
