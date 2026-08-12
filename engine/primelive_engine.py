@@ -479,6 +479,91 @@ def pick_camera_index(names, prefer=None, allow_phone=False):
     return None, None
 
 
+# ---------- 防 lag：背景抓圖執行緒 + 自動調解析度 ----------
+
+class CameraThread:
+    """背景執行緒持續抓「最新一格」。主迴圈不再被相機 I/O 卡住，也不會累積延遲
+    （慢的時候直接丟掉舊格、永遠處理最新的）。可用 swap() 換相機。"""
+    def __init__(self, cap):
+        self.cap = cap
+        self.lock = threading.Lock()
+        self.frame = None
+        self.seq = 0            # 每抓到新一格 +1，主迴圈用來判斷是不是新的
+        self.running = True
+        self.th = threading.Thread(target=self._loop, daemon=True)
+        self.th.start()
+
+    def _loop(self):
+        while self.running:
+            cap = self.cap
+            ok, fr = (cap.read() if cap is not None else (False, None))
+            if not ok or fr is None:
+                time.sleep(0.005)
+                continue
+            with self.lock:
+                self.frame = fr
+                self.seq += 1
+
+    def read(self):
+        """回傳 (有沒有畫面, frame, seq)。seq 沒變＝還是同一格。"""
+        with self.lock:
+            return (self.frame is not None), self.frame, self.seq
+
+    def swap(self, newcap):
+        old = self.cap
+        with self.lock:
+            self.cap = newcap
+            self.frame = None
+        if old is not None:
+            try:
+                old.release()
+            except Exception:
+                pass
+
+    def stop(self):
+        self.running = False
+        try:
+            self.th.join(timeout=0.5)
+        except Exception:
+            pass
+        if self.cap is not None:
+            try:
+                self.cap.release()
+            except Exception:
+                pass
+
+
+class Adaptive:
+    """依每格「處理耗時」自動調處理解析度倍率：跟不上 fps 就降（更順），
+    很有餘裕就升回去（更清晰）。強機維持 1.0＝原畫質；弱機自動降到 min_scale。"""
+    def __init__(self, target_fps=30, min_scale=0.5, enabled=True):
+        self.enabled = enabled
+        self.budget = 1.0 / max(1, target_fps)
+        self.scale = 1.0
+        self.min_scale = float(min_scale)
+        self.ema = self.budget
+        self.cool = 0
+
+    def update(self, dt):
+        self.ema = self.ema * 0.8 + dt * 0.2          # 平滑每格耗時
+        if not self.enabled or self.cool > 0:
+            self.cool = max(0, self.cool - 1)
+            return self.scale
+        if self.ema > self.budget * 0.95 and self.scale > self.min_scale:
+            self.scale = max(self.min_scale, round(self.scale - 0.1, 2))
+            self.cool = 12                            # 降完等幾格再評估，避免抖動
+        elif self.ema < self.budget * 0.55 and self.scale < 1.0:
+            self.scale = min(1.0, round(self.scale + 0.1, 2))
+            self.cool = 20
+        return self.scale
+
+    def proc_size(self, w, h):
+        if self.scale >= 0.999:
+            return w, h
+        return (max(2, int(w * self.scale) // 2 * 2),
+                max(2, int(h * self.scale) // 2 * 2))
+
+
 # ---------- 主程式 ----------
 
 def main():
@@ -494,6 +579,12 @@ def main():
     ap.add_argument("--cap-width", type=int, default=1280, help="擷取寬(降到 960 可衝 fps)")
     ap.add_argument("--cap-height", type=int, default=720)
     ap.add_argument("--fast", action="store_true", help="快速模式：540p 換更高 fps")
+    ap.add_argument("--target-fps", type=int, default=30, help="目標 fps（自動調解析度以維持它）")
+    ap.add_argument("--min-scale", type=float, default=0.5, help="自動降解析度的下限倍率（0.5＝最低降到一半）")
+    ap.add_argument("--no-adaptive", action="store_true", help="關閉自動調解析度（維持固定畫質）")
+    ap.add_argument("--no-threaded", action="store_true", help="關閉背景抓圖執行緒（除錯用）")
+    ap.add_argument("--gpu", action="store_true", help="嘗試用 GPU 跑 MediaPipe（失敗自動退回 CPU）")
+    ap.add_argument("--ready-file", default="", help="虛擬攝影機啟動後寫一個旗標檔（給一鍵開播腳本判斷可以開 OBS 了）")
     args = ap.parse_args()
     if args.fast:
         args.cap_width, args.cap_height = 960, 540
@@ -523,25 +614,49 @@ def main():
     with open(filters_path, "r", encoding="utf-8") as f:
         presets = json.load(f)["presets"]
     active = max(0, min(args.preset, len(presets) - 1))
+    need_blend = any(pr.get("lipsync") for pr in presets)   # 只有虛擬人嘴型才需要 blendshapes
 
-    landmarker = vision.FaceLandmarker.create_from_options(
-        vision.FaceLandmarkerOptions(
-            base_options=mp_python.BaseOptions(model_asset_path=MODEL),
-            running_mode=vision.RunningMode.VIDEO,
-            num_faces=1,
-            output_face_blendshapes=True,   # 給虛擬人嘴型同步用(jawOpen)
+    def make_base(path, use_gpu):
+        kw = {"model_asset_path": path}
+        if use_gpu:
+            try:
+                kw["delegate"] = mp_python.BaseOptions.Delegate.GPU
+            except Exception:
+                pass
+        return mp_python.BaseOptions(**kw)
+
+    def build_landmarker(use_gpu):
+        return vision.FaceLandmarker.create_from_options(
+            vision.FaceLandmarkerOptions(
+                base_options=make_base(MODEL, use_gpu),
+                running_mode=vision.RunningMode.VIDEO,
+                num_faces=1,
+                output_face_blendshapes=need_blend,
+            )
         )
-    )
+    try:
+        landmarker = build_landmarker(args.gpu)
+        if args.gpu:
+            print("[ok] MediaPipe 使用 GPU delegate")
+    except Exception as e:
+        if args.gpu:
+            print("[note] GPU delegate 不可用（%s），退回 CPU" % type(e).__name__)
+        landmarker = build_landmarker(False)
 
     segmenter = None
     if os.path.exists(MODEL_SEG):
-        segmenter = vision.ImageSegmenter.create_from_options(
-            vision.ImageSegmenterOptions(
-                base_options=mp_python.BaseOptions(model_asset_path=MODEL_SEG),
-                running_mode=vision.RunningMode.VIDEO,
-                output_confidence_masks=True,
+        def build_segmenter(use_gpu):
+            return vision.ImageSegmenter.create_from_options(
+                vision.ImageSegmenterOptions(
+                    base_options=make_base(MODEL_SEG, use_gpu),
+                    running_mode=vision.RunningMode.VIDEO,
+                    output_confidence_masks=True,
+                )
             )
-        )
+        try:
+            segmenter = build_segmenter(args.gpu)
+        except Exception:
+            segmenter = build_segmenter(False)
         print("[ok] 換背景分割模型已載入")
     else:
         print("[note] 找不到 selfie_segmenter.task，換背景功能停用")
@@ -604,10 +719,23 @@ def main():
     print("[ok] 攝影機 %dx%d，濾鏡 %d 個。數字鍵切換，q 離開。" % (W, H, len(presets)))
 
     import pyvirtualcam
-    cam = pyvirtualcam.Camera(width=W, height=H, fps=30, fmt=pyvirtualcam.PixelFormat.RGB)
-    print("[ok] 虛擬攝影機已啟動：%s" % cam.device)
+    OUT_W, OUT_H = W, H                       # 虛擬攝影機固定用第一格的尺寸
+    cam = pyvirtualcam.Camera(width=OUT_W, height=OUT_H, fps=args.target_fps, fmt=pyvirtualcam.PixelFormat.RGB)
+    print("[ok] 虛擬攝影機已啟動：%s（%dx%d@%d）" % (cam.device, OUT_W, OUT_H, args.target_fps))
+    if args.ready_file:                       # 通知「一鍵開播」腳本：虛擬攝影機好了，可以開 OBS
+        try:
+            with open(args.ready_file, "w", encoding="utf-8") as _rf:
+                _rf.write("ready")
+        except Exception:
+            pass
 
-    ui = {"active": active, "H": H, "rects": []}
+    threaded = not args.no_threaded
+    reader = CameraThread(cap) if threaded else None
+    adap = Adaptive(target_fps=args.target_fps, min_scale=args.min_scale, enabled=not args.no_adaptive)
+    print("[ok] 防lag：背景抓圖=%s，自動調解析度=%s（目標 %d fps，下限 %.0f%%）"
+          % ("開" if threaded else "關", "開" if not args.no_adaptive else "關", args.target_fps, args.min_scale * 100))
+
+    ui = {"active": active, "H": OUT_H, "rects": []}
     if not args.no_window:
         def _on_mouse(event, x, y, flags, param):
             if event == cv2.EVENT_LBUTTONDOWN:
@@ -620,73 +748,108 @@ def main():
 
     n = 0
     t0 = time.time()
-    seg_state = None   # (前景遮罩 m3, 已預乘的背景 bg*(1-m3))
+    seg_state = None    # (前景遮罩 m3, 已預乘的背景 bg*(1-m3))
+    seg_size = None     # seg_state 對應的處理解析度，變了要重算
+    last_seq = -1
+    last_full = None    # 上一格輸出（沒有新畫面時直接重送，省 CPU）
+    fps_ema = float(args.target_fps)
     try:
         while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            ts = int((time.time() - t0) * 1000) + n  # 單調遞增時間戳
-            mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-
+            # 濾鏡切換即時反映（點按鈕/按鍵）
             if ui["active"] != active:
                 active = ui["active"]
                 seg_state = None
             p = presets[active]
-            out = rgb.copy()
 
-            # 臉部關鍵點（貼紙 / 美顏 需要）
+            # 取一格：背景執行緒永遠給最新、丟舊格；沒新的就重送上一格、不重算
+            if threaded:
+                ok, frame, seq = reader.read()
+                if not ok:
+                    time.sleep(0.003)
+                    continue
+                is_new = (seq != last_seq)
+                last_seq = seq
+            else:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                is_new = True
+
             res = None
-            lms = None
-            if p.get("sticker") or p.get("beauty") or p.get("warp"):
-                res = landmarker.detect_for_video(mp_img, ts)
-                if res.face_landmarks:
-                    lms = res.face_landmarks[0]
+            if is_new:
+                t_proc = time.time()
+                # 自動調解析度：在縮小後的畫面跑整條管線，最後再放大送出
+                pw, ph = adap.proc_size(OUT_W, OUT_H)
+                if seg_size != (pw, ph):
+                    seg_state = None
+                    seg_size = (pw, ph)
+                proc = frame if (pw == OUT_W and ph == OUT_H) else cv2.resize(frame, (pw, ph), interpolation=cv2.INTER_AREA)
+                rgb = cv2.cvtColor(proc, cv2.COLOR_BGR2RGB)
+                ts = int((time.time() - t0) * 1000) + n  # 單調遞增時間戳
+                mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                out = rgb.copy()
 
-            # 1) 換背景（人像分割 + 合成）— 每 seg_every 格才重算遮罩，其餘重用
-            if p.get("background") and segmenter is not None:
-                if seg_state is None or (n % args.seg_every == 0):
-                    small = np.ascontiguousarray(cv2.resize(rgb, (384, 216)))
-                    seg = segmenter.segment_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=small), ts)
-                    bg = load_bg(os.path.join(ASSETS, p["background"]), W, H)
-                    if seg.confidence_masks and bg is not None:
-                        m = np.asarray(seg.confidence_masks[0].numpy_view(), dtype=np.float32)
-                        m = cv2.GaussianBlur(cv2.resize(m, (W, H)), (0, 0), 3.0)[..., None]
-                        seg_state = (m, bg.astype(np.float32) * (1.0 - m))
-                if seg_state is not None:
-                    m3, bg_pre = seg_state
-                    out = (out.astype(np.float32) * m3 + bg_pre).astype(np.uint8)
+                # 臉部關鍵點（貼紙 / 美顏 需要）
+                lms = None
+                if p.get("sticker") or p.get("beauty") or p.get("warp"):
+                    res = landmarker.detect_for_video(mp_img, ts)
+                    if res.face_landmarks:
+                        lms = res.face_landmarks[0]
 
-            # 2) 美顏（磨皮 + 瘦臉 + 化妝：魚尾紋/亮眼/唇彩/腮紅/修容）
-            if p.get("beauty") and lms is not None:
-                out = apply_beauty(out, lms, p["beauty"])
+                # 1) 換背景（人像分割 + 合成）— 每 seg_every 格才重算遮罩，其餘重用
+                if p.get("background") and segmenter is not None:
+                    if seg_state is None or (n % args.seg_every == 0):
+                        small = np.ascontiguousarray(cv2.resize(rgb, (384, 216)))
+                        seg = segmenter.segment_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=small), ts)
+                        bg = load_bg(os.path.join(ASSETS, p["background"]), pw, ph)
+                        if seg.confidence_masks and bg is not None:
+                            m = np.asarray(seg.confidence_masks[0].numpy_view(), dtype=np.float32)
+                            m = cv2.GaussianBlur(cv2.resize(m, (pw, ph)), (0, 0), 3.0)[..., None]
+                            seg_state = (m, bg.astype(np.float32) * (1.0 - m))
+                    if seg_state is not None:
+                        m3, bg_pre = seg_state
+                        out = (out.astype(np.float32) * m3 + bg_pre).astype(np.uint8)
 
-            # 2.5) 搞笑變形（大眼 / 大嘴）
-            if p.get("warp") and lms is not None:
-                w = p["warp"]
-                out = apply_warp(out, lms, float(w.get("eye", 0.0)), float(w.get("mouth", 0.0)))
+                # 2) 美顏（磨皮 + 瘦臉 + 化妝：魚尾紋/亮眼/唇彩/腮紅/修容）
+                if p.get("beauty") and lms is not None:
+                    out = apply_beauty(out, lms, p["beauty"])
 
-            # 3) LUT 調色
-            if p.get("lut"):
-                out = apply_lut(out, load_cube(os.path.join(ASSETS, p["lut"])))
+                # 2.5) 搞笑變形（大眼 / 大嘴）
+                if p.get("warp") and lms is not None:
+                    w = p["warp"]
+                    out = apply_warp(out, lms, float(w.get("eye", 0.0)), float(w.get("mouth", 0.0)))
 
-            # 4) 貼紙 / 換頭 / 面具（關鍵點錨定）
-            if p.get("sticker") and lms is not None:
-                if p.get("anchor") == "head":
-                    cx, cy, tw, ang = head_placement(lms, W, H, p.get("scale", 2.2), p.get("y_off", -0.15))
-                else:
-                    cx, cy, tw, ang = crown_placement(lms, W, H)
-                out = overlay(out, load_sticker(os.path.join(ASSETS, p["sticker"])), cx, cy, tw, ang)
-                if p.get("lipsync"):
-                    out = draw_mouth(out, cx, cy, tw, ang, jaw_open(res), p["lipsync"])
+                # 3) LUT 調色
+                if p.get("lut"):
+                    out = apply_lut(out, load_cube(os.path.join(ASSETS, p["lut"])))
 
-            cam.send(out)
+                # 4) 貼紙 / 換頭 / 面具（關鍵點錨定）
+                if p.get("sticker") and lms is not None:
+                    if p.get("anchor") == "head":
+                        cx, cy, tw, ang = head_placement(lms, pw, ph, p.get("scale", 2.2), p.get("y_off", -0.15))
+                    else:
+                        cx, cy, tw, ang = crown_placement(lms, pw, ph)
+                    out = overlay(out, load_sticker(os.path.join(ASSETS, p["sticker"])), cx, cy, tw, ang)
+                    if p.get("lipsync"):
+                        out = draw_mouth(out, cx, cy, tw, ang, jaw_open(res), p["lipsync"])
+
+                # 放大回輸出解析度
+                out_full = out if (pw == OUT_W and ph == OUT_H) else cv2.resize(out, (OUT_W, OUT_H), interpolation=cv2.INTER_LINEAR)
+                last_full = out_full
+                dt = time.time() - t_proc           # 純處理耗時（不含 sleep）→ 回饋給自動調解析度
+                adap.update(dt)
+                fps_ema = fps_ema * 0.9 + (1.0 / max(1e-3, dt)) * 0.1
+                n += 1
+
+            if last_full is not None:
+                cam.send(last_full)
             cam.sleep_until_next_frame()
 
-            if not args.no_window:
-                disp = cv2.cvtColor(out, cv2.COLOR_RGB2BGR)
-                panel, rects, _ = build_panel(presets, active, W)
+            if not args.no_window and last_full is not None:
+                disp = cv2.cvtColor(last_full, cv2.COLOR_RGB2BGR)
+                cv2.putText(disp, "fps~%.0f  scale %.1f  %dx%d" % (min(fps_ema, args.target_fps), adap.scale, OUT_W, OUT_H),
+                            (12, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (80, 255, 120), 2, cv2.LINE_AA)
+                panel, rects, _ = build_panel(presets, active, OUT_W)
                 ui["rects"] = rects
                 cv2.imshow("primelive engine", np.vstack([disp, panel]))
                 k = cv2.waitKey(1) & 0xFF
@@ -709,7 +872,6 @@ def main():
                         json.dump({"presets": presets}, f, ensure_ascii=False, indent=2)
                     print("  已存回 filters.json")
                 elif k == ord("n"):   # 切換到下一個可用攝影機(永遠跳過手機/連線相機)
-                    cap.release()
                     nxt, newcap = args.camera, None
                     for _ in range(6):
                         nxt = (nxt + 1) % 6
@@ -719,25 +881,31 @@ def main():
                         if newcap is not None:
                             break
                     if newcap is not None:
-                        cap, args.camera = newcap, nxt
+                        args.camera = nxt
+                        if threaded:
+                            reader.swap(newcap)
+                        else:
+                            cap.release(); cap = newcap
+                        seg_state = None
                         print("  -> 切換攝影機 camera", nxt)
                     else:
-                        cap, _ = open_cam(args.camera)
                         print("  找不到其他攝影機")
                 else:
                     for i, pr in enumerate(presets):
                         if k == ord(pr["key"]):
                             ui["active"] = i
 
-            n += 1
             if args.frames and n >= args.frames:
                 faces = 1 if (res and res.face_landmarks) else 0
-                print("[煙霧測試] 跑了 %d 格，最後一格偵測到臉=%d，fps~%.1f"
-                      % (n, faces, n / max(1e-6, time.time() - t0)))
+                print("[煙霧測試] 跑了 %d 格，最後一格偵測到臉=%d，fps~%.1f，末端 scale=%.2f"
+                      % (n, faces, n / max(1e-6, time.time() - t0), adap.scale))
                 break
     finally:
         cam.close()
-        cap.release()
+        if threaded and reader is not None:
+            reader.stop()
+        elif cap is not None:
+            cap.release()
         cv2.destroyAllWindows()
 
 
