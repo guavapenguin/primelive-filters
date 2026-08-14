@@ -35,10 +35,11 @@ cp "$HERE/golive_mac.command" "$HERE/setup_mac.sh" "$STAGE/"
 chmod +x "$STAGE/golive_mac.command" "$STAGE/setup_mac.sh"
 cat > "$STAGE/使用說明.txt" <<'EOF'
 primelive 一鍵開播 (macOS)
-1) 先安裝 OBS: https://obsproject.com/ (裝好後開一次 OBS、按「啟動虛擬相機」一次以啟用系統擴充,然後關閉)
-2) 把整個資料夾拖到「應用程式」或桌面
-3) 雙擊 golive_mac.command(第一次:右鍵→打開)
-4) 貼上串流金鑰 → 引擎視窗選濾鏡 → 按「● 開始直播」
+1) 先安裝 OBS: https://obsproject.com/ (裝好即可,不用開)
+2) 把整個資料夾拖到桌面
+3) 雙擊 golive_mac.command(第一次:按住 control 點它→打開)
+4) 貼上串流金鑰 → 系統跳出任何詢問都按「允許」
+5) 視窗出現後:選濾鏡 → 按「● 開始直播」→ 回平台按「確認開播」
 EOF
 hdiutil create -volname "primelive" -srcfolder "$STAGE" -ov -format UDZO "$ENG/dist/primelive_mac.dmg"
 echo "完成 -> $ENG/dist/primelive_mac.dmg"

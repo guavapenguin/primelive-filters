@@ -1217,7 +1217,28 @@ def main():
     ap.add_argument("--no-threaded", action="store_true", help="關閉背景抓圖執行緒（除錯用）")
     ap.add_argument("--gpu", action="store_true", help="嘗試用 GPU 跑 MediaPipe（失敗自動退回 CPU）")
     ap.add_argument("--ready-file", default="", help="虛擬攝影機啟動後寫一個旗標檔（給一鍵開播腳本判斷可以開 OBS 了）")
+    ap.add_argument("--obs-vcam-kick", action="store_true",
+                    help="macOS 首次自動化:遙控 OBS 啟動→停止虛擬相機以註冊系統擴充,完成即退出")
     args = ap.parse_args()
+
+    if args.obs_vcam_kick:
+        # 讓 OBS 自己註冊虛擬相機擴充(啟動→停止,註冊會永久保留);等 OBS websocket 最多 30 秒
+        ctl = ObsControl()
+        ok = False
+        for _ in range(30):
+            try:
+                ctl._rpc("StartVirtualCam")
+                time.sleep(2)
+                try:
+                    ctl._rpc("StopVirtualCam")
+                except Exception:
+                    pass
+                ok = True
+                break
+            except Exception:
+                time.sleep(1)
+        print("[ok] OBS 虛擬相機擴充已啟用" if ok else "[note] 連不上 OBS,略過虛擬相機啟用")
+        sys.exit(0 if ok else 1)
     if args.fast:
         args.cap_width, args.cap_height = 960, 540
 
