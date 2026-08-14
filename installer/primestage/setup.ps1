@@ -301,6 +301,20 @@ function Set-BasicSelection($iniPath) {
 Set-BasicSelection (Join-Path $obsRoot "user.ini")
 Set-BasicSelection (Join-Path $obsRoot "global.ini")
 
+# 關閉 OBS 自動更新提示(開播前跳更新視窗會讓主播卡住)
+try {
+    $gIni = Join-Path $obsRoot "global.ini"
+    $raw = [System.IO.File]::ReadAllText($gIni)
+    if ($raw -match "EnableAutoUpdates=") {
+        $raw = $raw -replace "EnableAutoUpdates=\w+", "EnableAutoUpdates=false"
+    } elseif ($raw -match "(?m)^\[General\]") {
+        $raw = $raw -replace "(?m)^\[General\]", "[General]`r`nEnableAutoUpdates=false"
+    } else {
+        $raw = "[General]`r`nEnableAutoUpdates=false`r`n`r`n" + $raw
+    }
+    Write-IniFile $gIni $raw
+} catch {}
+
 # ---- 8. 完成 ----------------------------------------------------------------
 $keyState = if ($Key) { "已寫入你的金鑰" } else { "尚未填金鑰(記得到 OBS 設定→直播 貼上)" }
 $camStep = if ($Camera -eq "primelive") {
