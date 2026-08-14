@@ -22,6 +22,38 @@ function Die($m){
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $InstallerUrl = "https://storage.googleapis.com/mail_use/primelive_filter_setup.exe"
 
+# 置頂小視窗進度回饋(主控台隱藏後,長時間作業給使用者「有在動」的訊息)
+$script:progressFlag = $null
+function Show-Progress($text) {
+    Hide-Progress
+    $script:progressFlag = Join-Path $env:TEMP ("primestage_busy_" + [guid]::NewGuid().ToString("N") + ".flag")
+    New-Item -ItemType File -Path $script:progressFlag -Force | Out-Null
+    $code = @"
+Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing
+`$f = New-Object System.Windows.Forms.Form
+`$f.FormBorderStyle='None'; `$f.TopMost=`$true; `$f.StartPosition='CenterScreen'
+`$f.Size = New-Object System.Drawing.Size(420, 90)
+`$f.BackColor = [System.Drawing.Color]::FromArgb(22,18,27)
+`$l = New-Object System.Windows.Forms.Label
+`$l.Text = '$text'
+`$l.ForeColor = [System.Drawing.Color]::FromArgb(246,243,240)
+`$l.Font = New-Object System.Drawing.Font('Microsoft JhengHei UI', 11)
+`$l.Dock = 'Fill'; `$l.TextAlign = 'MiddleCenter'
+`$f.Controls.Add(`$l)
+`$t = New-Object System.Windows.Forms.Timer; `$t.Interval = 400
+`$t.Add_Tick({ if (-not (Test-Path '$($script:progressFlag)')) { `$f.Close() } })
+`$t.Start(); [void]`$f.ShowDialog()
+"@
+    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($code))
+    Start-Process powershell -ArgumentList "-NoProfile","-WindowStyle","Hidden","-EncodedCommand",$enc | Out-Null
+}
+function Hide-Progress {
+    if ($script:progressFlag) {
+        Remove-Item $script:progressFlag -Force -ErrorAction SilentlyContinue
+        $script:progressFlag = $null
+    }
+}
+
 function Find-Obs {
     @("$env:ProgramFiles\obs-studio\bin\64bit\obs64.exe",
       "${env:ProgramFiles(x86)}\obs-studio\bin\64bit\obs64.exe") |
@@ -48,25 +80,30 @@ if (-not $obsExe -or -not $engineExe) {
                 Where-Object { Test-Path $_ } | Select-Object -First 1
     if (-not $setupExe) {
         $setupExe = Join-Path $env:TEMP "primelive_filter_setup.exe"
-        Note "下載安裝檔(約400MB,依網速需數分鐘,請勿關閉視窗)..."
+        Note "下載安裝檔(約400MB)..."
+        Show-Progress "正在下載直播環境安裝檔(約 400MB)，請稍候…"
         $curl = "$env:SystemRoot\System32\curl.exe"
         if (Test-Path $curl) {
-            & $curl -L --retry 3 --connect-timeout 30 -o $setupExe $InstallerUrl
+            & $curl -sL --retry 3 --connect-timeout 30 -o $setupExe $InstallerUrl
         } else {
             try { Start-BitsTransfer -Source $InstallerUrl -Destination $setupExe -ErrorAction Stop }
             catch { (New-Object Net.WebClient).DownloadFile($InstallerUrl, $setupExe) }
         }
+        Hide-Progress
         if (-not (Test-Path $setupExe) -or (Get-Item $setupExe).Length -lt 100MB) {
             Die "安裝檔下載失敗。請檢查網路後重試,或向小編索取安裝檔放到本資料夾再執行。"
         }
     }
-    Note "安裝 OBS + 濾鏡引擎(會跳出權限視窗請按「是」;約 2~3 分鐘)..."
+    Note "安裝 OBS + 濾鏡引擎..."
+    Show-Progress "正在安裝 OBS 與濾鏡引擎(約 2~3 分鐘)，權限視窗請按「是」…"
     try {
         $p = Start-Process -FilePath $setupExe -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Verb RunAs -Wait -PassThru
         Note "安裝程式結束(代碼 $($p.ExitCode))。"
     } catch {
+        Hide-Progress
         Die "安裝被取消或失敗($($_.Exception.Message))。請重新執行並在權限視窗按「是」。"
     }
+    Hide-Progress
     $obsExe = Find-Obs; $engineExe = Find-Engine
     if (-not $obsExe)    { Die "OBS 安裝未完成,請重新執行本檔一次。" }
     if (-not $engineExe) { Die "濾鏡引擎安裝未完成,請重新執行本檔一次。" }
