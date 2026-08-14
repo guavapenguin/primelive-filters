@@ -301,6 +301,20 @@ function Set-BasicSelection($iniPath) {
 Set-BasicSelection (Join-Path $obsRoot "user.ini")
 Set-BasicSelection (Join-Path $obsRoot "global.ini")
 
+# 啟用 OBS WebSocket(隨機密碼,只給本機引擎「開始直播」按鈕遙控用)
+try {
+    $wsPwd = [guid]::NewGuid().ToString("N")
+    $existing = Join-Path $env:APPDATA "PrimeStage\obsws.json"
+    if (Test-Path $existing) {   # 已有密碼就沿用(避免 OBS 端與引擎端不同步)
+        try { $wsPwd = (Get-Content $existing -Raw -Encoding UTF8 | ConvertFrom-Json).password } catch {}
+    }
+    $wsDir = Join-Path $obsRoot "plugin_config\obs-websocket"
+    New-Item -ItemType Directory -Force -Path $wsDir | Out-Null
+    Write-TextNoBom (Join-Path $wsDir "config.json") ('{"alerts_enabled":false,"auth_required":true,"first_load":false,"server_enabled":true,"server_password":"' + $wsPwd + '","server_port":4455}')
+    New-Item -ItemType Directory -Force -Path (Join-Path $env:APPDATA "PrimeStage") | Out-Null
+    Write-TextNoBom $existing ('{"port":4455,"password":"' + $wsPwd + '"}')
+} catch {}
+
 # 關閉 OBS 自動更新提示(開播前跳更新視窗會讓主播卡住)
 try {
     $gIni = Join-Path $obsRoot "global.ini"

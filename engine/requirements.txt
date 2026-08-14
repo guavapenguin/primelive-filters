@@ -4,3 +4,4 @@ pyvirtualcam
 numpy
 pillow
 pygrabber
+websocket-client

@@ -558,7 +558,87 @@ def build_panel(presets, active, W):
     return _panel_cache[active]
 
 
-# ---------- v6 濾鏡選擇器（單排橫向可捲動;主畫面=OBS 預覽,引擎視窗只有這條）----------
+# ---------- OBS 遙控（obs-websocket v5,localhost 免密碼;讓主播不用看到 OBS）----------
+class ObsControl:
+    def __init__(self, port=4455):
+        self.port = port
+        self.password = ""
+        self.streaming = False
+        self.connected = False
+        self.busy = False
+        try:   # 設定流程(setup.ps1)產生的連線資訊:埠+隨機密碼
+            cfg = json.load(open(os.path.join(os.environ.get("APPDATA", ""), "PrimeStage", "obsws.json"),
+                                 encoding="utf-8"))
+            self.port = int(cfg.get("port", self.port))
+            self.password = cfg.get("password", "")
+        except Exception:
+            pass
+
+    def _rpc(self, req_type, req_data=None):
+        import websocket as _ws
+        import uuid as _uuid
+        import hashlib as _hl
+        import base64 as _b64
+        ws = _ws.create_connection("ws://127.0.0.1:%d" % self.port, timeout=3)
+        try:
+            hello = json.loads(ws.recv())                           # Hello
+            ident = {"rpcVersion": 1}
+            auth = (hello.get("d") or {}).get("authentication")
+            if auth and self.password:                              # obs-websocket v5 認證
+                sec = _b64.b64encode(_hl.sha256((self.password + auth["salt"]).encode()).digest()).decode()
+                ident["authentication"] = _b64.b64encode(_hl.sha256((sec + auth["challenge"]).encode()).digest()).decode()
+            ws.send(json.dumps({"op": 1, "d": ident}))              # Identify
+            json.loads(ws.recv())                                   # Identified
+            rid = str(_uuid.uuid4())
+            req = {"requestType": req_type, "requestId": rid}
+            if req_data:
+                req["requestData"] = req_data
+            ws.send(json.dumps({"op": 6, "d": req}))
+            while True:
+                m = json.loads(ws.recv())
+                if m.get("op") == 7 and m["d"].get("requestId") == rid:
+                    return m["d"]
+        finally:
+            try:
+                ws.close()
+            except Exception:
+                pass
+
+    def toggle_stream_async(self):
+        """非同步切換直播(不卡輸出迴圈);結果反映在 self.streaming/connected。"""
+        if self.busy:
+            return
+        self.busy = True
+        def run():
+            try:
+                d = self._rpc("ToggleStream")
+                rd = d.get("responseData") or {}
+                self.streaming = bool(rd.get("outputActive", not self.streaming))
+                self.connected = True
+            except Exception:
+                self.connected = False
+            finally:
+                self.busy = False
+        threading.Thread(target=run, daemon=True).start()
+
+    def poll_async(self):
+        if self.busy:
+            return
+        self.busy = True
+        def run():
+            try:
+                d = self._rpc("GetStreamStatus")
+                rd = d.get("responseData") or {}
+                self.streaming = bool(rd.get("outputActive"))
+                self.connected = True
+            except Exception:
+                self.connected = False
+            finally:
+                self.busy = False
+        threading.Thread(target=run, daemon=True).start()
+
+
+# ---------- v7 主視窗（即時畫面+濾鏡條+開始直播;OBS 藏系統匣,主播只看這窗）----------
 STRIP_VIEW_W = 1220
 STRIP_TW = 78
 STRIP_GAP, STRIP_PAD = 6, 12
@@ -728,6 +808,125 @@ def build_strip_view(presets, thumbs, active, scroll, tw, th, status, demo_label
            font=zh(8.2), fill=SUB)
     bgr = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
     return bgr, rects, max_scroll, H
+
+
+PV_W, PV_H = 640, 360                      # 即時畫面區(16:9)
+LIVE_BTN = (STRIP_VIEW_W - 228, STRIP_HDR + 128, STRIP_VIEW_W - 28, STRIP_HDR + 196)
+
+def build_main_view(presets, thumbs, active, scroll, tw, th, live, demo_label):
+    """v7 主視窗:header + 即時畫面(中央) + 左資訊/右開播鈕 + 濾鏡條 + footer。
+    回傳 (BGR, rects, max_scroll, H, preview_slot)。preview 由主迴圈每格貼上。"""
+    n = len(presets)
+    content_w = STRIP_PAD * 2 + n * tw + (n - 1) * STRIP_GAP
+    max_scroll = max(0, content_w - STRIP_VIEW_W)
+    scroll = int(max(0, min(scroll, max_scroll)))
+    pv_y = STRIP_HDR + 8
+    strip_y = pv_y + PV_H + 10
+    ty = strip_y + STRIP_TAGH
+    H = ty + th + STRIP_LBL + 2 + STRIP_SBH + 4 + STRIP_FOOT
+
+    pil = PILImage.new("RGB", (STRIP_VIEW_W, H), (23, 18, 16))
+    d = PILDraw.Draw(pil, "RGBA")
+    zhb = lambda s: _uifont("zhb", s); zh = lambda s: _uifont("zh", s)
+    en = lambda s: _uifont("en", s); ensb = lambda s: _uifont("ensb", s)
+    GOLD = (233, 193, 122); ACCENT = (240, 164, 96); TXT = (240, 242, 246)
+    SUB = (139, 147, 162); DIM = (96, 102, 116)
+
+    # 頂欄
+    d.rectangle([0, 0, STRIP_VIEW_W, STRIP_HDR], fill=(22, 25, 32))
+    d.text((STRIP_PAD, 6), "primelive", font=ensb(14), fill=GOLD)
+    plw = d.textlength("primelive", font=ensb(14))
+    d.text((STRIP_PAD + plw + 8, 9), "一鍵直播", font=zhb(11), fill=TXT)
+    if demo_label:
+        d.rounded_rectangle(list(DEMO_CHIP), radius=10, outline=(120, 127, 142), width=1)
+        d.text(((DEMO_CHIP[0] + DEMO_CHIP[2]) / 2, STRIP_HDR / 2), demo_label, font=zh(9),
+               fill=(250, 214, 166), anchor="mm")
+
+    # 即時畫面框(置中) — 內容由主迴圈每格貼
+    pv_x = (STRIP_VIEW_W - PV_W) // 2
+    d.rounded_rectangle([pv_x - 2, pv_y - 2, pv_x + PV_W + 2, pv_y + PV_H + 2],
+                        radius=8, outline=(58, 63, 76), width=1, fill=(12, 13, 17))
+    d.text((pv_x + PV_W / 2, pv_y + PV_H / 2), "等待攝影機…", font=zh(12), fill=DIM, anchor="mm")
+
+    # 左資訊欄
+    cur = presets[active]
+    lx = STRIP_PAD + 8
+    d.text((lx, pv_y + 16), "目前濾鏡", font=zh(10), fill=SUB)
+    d.text((lx, pv_y + 36), cur.get("name", ""), font=zhb(19), fill=(250, 214, 166))
+    d.text((lx, pv_y + 68), cur.get("en", ""), font=en(11), fill=SUB)
+    d.text((lx, pv_y + 110), "畫面已含濾鏡效果", font=zh(9.5), fill=SUB)
+    d.text((lx, pv_y + 128), "＝觀眾看到的樣子", font=zh(9.5), fill=SUB)
+
+    # 右欄:開始直播大鈕 + 狀態
+    bx0, by0, bx1, by1 = LIVE_BTN
+    if live.get("busy"):
+        d.rounded_rectangle([bx0, by0, bx1, by1], radius=12, fill=(70, 74, 86))
+        d.text(((bx0 + bx1) / 2, (by0 + by1) / 2), "處理中…", font=zhb(15), fill=(210, 213, 220), anchor="mm")
+    elif live.get("streaming"):
+        d.rounded_rectangle([bx0, by0, bx1, by1], radius=12, fill=(64, 68, 80), outline=(120, 127, 142), width=1)
+        d.text(((bx0 + bx1) / 2, (by0 + by1) / 2), "■  停止直播", font=zhb(16), fill=(255, 176, 168), anchor="mm")
+    else:
+        d.rounded_rectangle([bx0, by0, bx1, by1], radius=12, fill=(204, 62, 54))
+        d.text(((bx0 + bx1) / 2, (by0 + by1) / 2), "●  開始直播", font=zhb(16), fill=(255, 245, 242), anchor="mm")
+    if live.get("streaming"):
+        st = "直播中 · 平台記得按「確認開播」"
+        stc = (255, 176, 168)
+    elif live.get("connected"):
+        st = "OBS 已就緒(背景執行)"
+        stc = (150, 220, 170)
+    else:
+        st = "等待 OBS 連線…"
+        stc = SUB
+    d.text(((bx0 + bx1) / 2, by1 + 18), st, font=zh(9.5), fill=stc, anchor="mm")
+    d.text(((bx0 + bx1) / 2, by0 - 16), "不用開 OBS,按這顆就好", font=zh(9.5), fill=SUB, anchor="mm")
+
+    # 濾鏡條
+    rects = []
+    prev_cat = None
+    for i, p in enumerate(presets):
+        x = STRIP_PAD + i * (tw + STRIP_GAP) - scroll
+        cat = _CATZH.get(p.get("cat", "basic"), "")
+        if cat != prev_cat:
+            if -120 < x < STRIP_VIEW_W:
+                d.text((max(2, x), strip_y + 1), "%s  %s" % (cat, _CATEN.get(p.get("cat", "basic"), "")),
+                       font=zhb(8.5), fill=GOLD if cat == "美顏" else SUB)
+            prev_cat = cat
+        if x + tw < 0 or x > STRIP_VIEW_W:
+            continue
+        on = (i == active)
+        tb = thumbs[i]
+        if tb is not None:
+            pil.paste(PILImage.fromarray(cv2.cvtColor(tb, cv2.COLOR_BGR2RGB)), (int(x), ty))
+        else:
+            d.rounded_rectangle([x, ty, x + tw, ty + th], radius=6, fill=(30, 33, 41))
+            d.text((x + tw / 2, ty + th / 2), "更新中", font=zh(8), fill=DIM, anchor="mm")
+        if on:
+            d.rounded_rectangle([x, ty, x + tw, ty + th], radius=6, outline=ACCENT, width=2)
+        d.text((x + tw / 2, ty + th + 2), p.get("name", ""), font=zhb(9) if on else zh(9),
+               fill=(250, 214, 166) if on else TXT, anchor="ma")
+        enl = p.get("en", "")
+        if d.textlength(enl, font=en(6.5)) > tw:
+            enl = enl[:13] + "…"
+        d.text((x + tw / 2, ty + th + 15), enl, font=en(6.5), fill=SUB, anchor="ma")
+        rects.append((int(x), ty, int(x + tw), ty + th, i))
+
+    if scroll > 0:
+        d.polygon([(10, ty + th / 2 - 8), (4, ty + th / 2), (10, ty + th / 2 + 8)], fill=(210, 214, 222))
+    if scroll < max_scroll:
+        d.polygon([(STRIP_VIEW_W - 10, ty + th / 2 - 8), (STRIP_VIEW_W - 4, ty + th / 2),
+                   (STRIP_VIEW_W - 10, ty + th / 2 + 8)], fill=(210, 214, 222))
+    sy = ty + th + STRIP_LBL + 2
+    d.rounded_rectangle([STRIP_PAD, sy, STRIP_VIEW_W - STRIP_PAD, sy + STRIP_SBH - 2], radius=2, fill=(34, 38, 47))
+    frac = min(1.0, STRIP_VIEW_W / float(content_w))
+    bar_w = (STRIP_VIEW_W - STRIP_PAD * 2) * frac
+    bar_x = STRIP_PAD + (STRIP_VIEW_W - STRIP_PAD * 2 - bar_w) * (scroll / float(max_scroll) if max_scroll else 0)
+    d.rounded_rectangle([bar_x, sy, bar_x + bar_w, sy + STRIP_SBH - 2], radius=2, fill=(88, 95, 110))
+    d.text((STRIP_PAD, H - STRIP_FOOT - 1),
+           "左右滑動或 ← → 換濾鏡 · 點縮圖直接選 · 右上切換示範模特 · 準備好按「開始直播」",
+           font=zh(8.2), fill=SUB)
+
+    bgr = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+    return bgr, rects, max_scroll, H, (pv_x, pv_y, PV_W, PV_H)
 
 
 # ---------- 鏡頭選擇（用名稱挑 OBSBOT，永不誤開手機/連線相機）----------
@@ -1045,6 +1244,8 @@ def main():
         strip_th = max(30, int(STRIP_TW * H / float(W)))     # 沒示範圖才退回攝影機比例
     thumbs_map = {g: [None] * len(presets) for g in (demo_imgs or {"live": None})}
     worker = ThumbWorker(presets, ASSETS)
+    obs_ctl = ObsControl()
+    ui["live_toggle"] = False
     WIN = "primelive"    # OpenCV 視窗標題不支援中文(會亂碼),用純英文
     if not args.no_window:
         def _on_mouse(event, x, y, flags, param):
@@ -1062,7 +1263,9 @@ def main():
                     ui["dirty"] = True
             elif event == cv2.EVENT_LBUTTONUP:
                 if ui["drag"] is not None and not ui["moved"]:
-                    if (DEMO_CHIP[0] <= x <= DEMO_CHIP[2]) and (y <= STRIP_HDR):
+                    if (LIVE_BTN[0] <= x <= LIVE_BTN[2]) and (LIVE_BTN[1] <= y <= LIVE_BTN[3]):
+                        ui["live_toggle"] = True     # 開始/停止直播
+                    elif (DEMO_CHIP[0] <= x <= DEMO_CHIP[2]) and (y <= STRIP_HDR):
                         ui["toggle"] = True          # 右上 chip:切換示範模特
                     else:
                         for (x0, y0, x1, y1, idx) in ui["rects"]:
@@ -1185,21 +1388,38 @@ def main():
                         if thumbs_map[g][0] is None and not worker.busy:
                             worker.start(demo_imgs[g], strip_tw, strip_th, thumbs_map[g])
                         ui["dirty"] = True
-                # 縮圖進度或狀態改變才重繪(省 CPU)
+                # 開始/停止直播(遙控背景 OBS,不卡輸出)
+                if ui.get("live_toggle"):
+                    ui["live_toggle"] = False
+                    obs_ctl.toggle_stream_async()
+                    ui["dirty"] = True
+                if n == 30 or (n % 240 == 0):     # 定期同步 OBS 狀態(~8秒)
+                    obs_ctl.poll_async()
+                # 縮圖進度/狀態改變才重繪 chrome;即時畫面每格貼上
+                lstate = (obs_ctl.streaming, obs_ctl.connected, obs_ctl.busy)
                 ver = worker.version
-                if ui["dirty"] or ver != ui.get("_ver") or (n % 30 == 0):
-                    status = "OBS Virtual Camera ● %.0ffps" % min(fps_ema, args.target_fps)
+                if ui["dirty"] or ver != ui.get("_ver") or lstate != ui.get("_ls"):
                     demo_label = ""
                     if len(demo_imgs) > 1:
                         demo_label = "示範:女→男" if ui["demo"] == "f" else "示範:男→女"
                     cur_thumbs = thumbs_map.get(ui["demo"]) or worker.thumbs
-                    view, rects, max_sc, _ = build_strip_view(presets, cur_thumbs, ui["active"],
-                                                              ui["scroll"], strip_tw, strip_th,
-                                                              status, demo_label)
+                    live = {"streaming": lstate[0], "connected": lstate[1], "busy": lstate[2]}
+                    chrome, rects, max_sc, _, pv_slot = build_main_view(
+                        presets, cur_thumbs, ui["active"], ui["scroll"],
+                        strip_tw, strip_th, live, demo_label)
                     ui["scroll"] = max(0, min(ui["scroll"], max_sc))
                     ui["rects"] = rects
                     ui["_ver"] = ver
+                    ui["_ls"] = lstate
+                    ui["chrome"] = chrome
+                    ui["pv"] = pv_slot
                     ui["dirty"] = False
+                if ui.get("chrome") is not None:
+                    view = ui["chrome"].copy()
+                    if last_full is not None and ui.get("pv"):
+                        px0, py0, pw_, ph_ = ui["pv"]
+                        view[py0:py0 + ph_, px0:px0 + pw_] = cv2.resize(
+                            cv2.cvtColor(last_full, cv2.COLOR_RGB2BGR), (pw_, ph_))
                     cv2.imshow(WIN, view)
                 # 鍵盤只有 ← →(其餘交給滑鼠);關閉視窗(X)= 離開
                 k = cv2.waitKeyEx(1)
