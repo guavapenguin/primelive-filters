@@ -293,11 +293,12 @@ function Set-BasicSelection($iniPath) {
         }
         Write-IniFile $iniPath $raw
     } else {
-        Write-IniFile $iniPath ($block + "`r`n")
+        # 全新機:OBS 還沒跑過、檔案不存在 → 直接建(含 FirstRun 標記,避免首次設定精靈蓋掉選擇)
+        Write-IniFile $iniPath ("[General]`r`nFirstRun=true`r`nPre19Defaults=false`r`nPre21Defaults=false`r`nPre23Defaults=false`r`nPre24.1Defaults=false`r`n`r`n" + $block + "`r`n")
     }
 }
-$userIni = Join-Path $obsRoot "user.ini"
-if (Test-Path $userIni) { Set-BasicSelection $userIni }
+# OBS 31+ 讀 user.ini、30.x 讀 global.ini;兩個都「一定」寫(全新機兩個都不存在,不存在就建)
+Set-BasicSelection (Join-Path $obsRoot "user.ini")
 Set-BasicSelection (Join-Path $obsRoot "global.ini")
 
 # ---- 8. 完成 ----------------------------------------------------------------

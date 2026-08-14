@@ -150,7 +150,9 @@ if ($ok) { Note "引擎就緒。" } else { Note "等逾時,仍先開 OBS(引擎�
 if (Get-Process obs64 -ErrorAction SilentlyContinue) {
     Note "OBS 已經開著。"
 } else {
-    Note "開啟 OBS..."
-    Start-Process -FilePath $obsExe -WorkingDirectory (Split-Path -Parent $obsExe) | Out-Null
+    Note "開啟 OBS(強制指定 Prime Stage 直式 設定檔/場景)..."
+    # --profile/--collection 直接指定,不受 user.ini 初始化狀態影響(全新機保險)
+    Start-Process -FilePath $obsExe -WorkingDirectory (Split-Path -Parent $obsExe) `
+        -ArgumentList '--profile','Prime Stage 直式','--collection','Prime Stage 直式' | Out-Null
 }
 Note "完成。引擎視窗滾輪選濾鏡;OBS 按「開始串流」後回平台「確認開播」。"
