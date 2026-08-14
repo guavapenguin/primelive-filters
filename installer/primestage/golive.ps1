@@ -61,6 +61,7 @@ function Find-Obs {
 }
 function Find-Engine {
     @($EnginePath,
+      (Join-Path (Split-Path $here) "primelive_filter.exe"),   # 安裝目錄相對(裝哪都對,最優先)
       "$env:ProgramFiles\primelive-filter\primelive_filter.exe",
       "${env:ProgramFiles(x86)}\primelive-filter\primelive_filter.exe",
       (Join-Path $here "engine\primelive_filter.exe"),
