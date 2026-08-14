@@ -27,18 +27,21 @@ echo "[3/4] 複製模型/設定/素材進 .app..."
 cp "$ENG/face_landmarker.task" "$ENG/selfie_segmenter.task" "$ENG/filters.json" "$RES/"
 cp -R "$ASSETS" "$RES/assets"
 
-echo "[4/4] 做發佈 dmg(app+開播腳本+說明)..."
+echo "[4/4] 做發佈 dmg(app+開播腳本+內附OBS安裝檔+說明)..."
 STAGE="$ENG/dist/dmg_stage"
 rm -rf "$STAGE"; mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"
 cp "$HERE/golive_mac.command" "$HERE/setup_mac.sh" "$STAGE/"
 chmod +x "$STAGE/golive_mac.command" "$STAGE/setup_mac.sh"
+# 內附 OBS 官方安裝檔(Apple Silicon;Intel 機器會自動改抓官方 Intel 版)
+curl -sL --retry 3 -o "$STAGE/OBS-Studio.dmg" \
+  "https://github.com/obsproject/obs-studio/releases/download/32.1.2/OBS-Studio-32.1.2-macOS-Apple.dmg"
 cat > "$STAGE/使用說明.txt" <<'EOF'
 primelive 一鍵開播 (macOS)
-1) 先安裝 OBS: https://obsproject.com/ (裝好即可,不用開)
-2) 把整個資料夾拖到桌面
-3) 雙擊 golive_mac.command(第一次:按住 control 點它→打開)
-4) 貼上串流金鑰 → 系統跳出任何詢問都按「允許」
+1) 把整個資料夾拖到桌面
+2) 按住 control 點 golive_mac.command → 打開(只有第一次要這樣)
+3) 它會自動裝好 OBS → 跳出視窗貼上你的「串流金鑰」
+4) 系統跳出任何詢問都按「允許」
 5) 視窗出現後:選濾鏡 → 按「● 開始直播」→ 回平台按「確認開播」
 EOF
 hdiutil create -volname "primelive" -srcfolder "$STAGE" -ov -format UDZO "$ENG/dist/primelive_mac.dmg"
