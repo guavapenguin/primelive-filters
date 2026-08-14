@@ -3,5 +3,5 @@ opencv-python
 pyvirtualcam
 numpy
 pillow
-pygrabber
+pygrabber; sys_platform == "win32"
 websocket-client
