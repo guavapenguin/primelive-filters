@@ -29,6 +29,19 @@ if sys.platform == "win32":
         ctypes.windll.kernel32.SetConsoleOutputCP(65001)
     except Exception:
         pass
+# --noconsole(視窗模式)打包時 stdout/stderr 是 None,print 會炸 → 導到日誌檔
+if getattr(sys, "frozen", False) and (sys.stdout is None or sys.stderr is None):
+    try:
+        _log = open(os.path.join(os.environ.get("TEMP", "."), "primelive_engine.log"),
+                    "a", encoding="utf-8", buffering=1)
+        if sys.stdout is None:
+            sys.stdout = _log
+        if sys.stderr is None:
+            sys.stderr = _log
+    except Exception:
+        import io
+        sys.stdout = sys.stdout or io.StringIO()
+        sys.stderr = sys.stderr or io.StringIO()
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")

@@ -33,9 +33,9 @@ Source: "f:\mcp\primelive\obs\installer\OBS-Studio-Installer.exe"; DestDir: "{tm
 
 [Icons]
 ; 桌面只留一顆:一鍵開播(首次自動跑 選設備→金鑰→OBS設定,之後直接開引擎+OBS)
-Name: "{commondesktop}\primelive 一鍵開播"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\primestage\golive.ps1"""; IconFilename: "{app}\primelive_filter.exe"; Comment: "primelive 一鍵開播"
-Name: "{group}\primelive 一鍵開播"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\primestage\golive.ps1"""; IconFilename: "{app}\primelive_filter.exe"
-Name: "{group}\重新選攝影機麥克風"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\primestage\devices.ps1"""
+Name: "{commondesktop}\primelive 一鍵開播"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\primestage\golive.ps1"""; IconFilename: "{app}\primelive_filter.exe"; Comment: "primelive 一鍵開播"
+Name: "{group}\primelive 一鍵開播"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\primestage\golive.ps1"""; IconFilename: "{app}\primelive_filter.exe"
+Name: "{group}\重新選攝影機麥克風"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\primestage\devices.ps1"""
 Name: "{group}\使用說明"; Filename: "{app}\使用說明.txt"
 Name: "{group}\移除 primelive 濾鏡"; Filename: "{uninstallexe}"
 
@@ -43,4 +43,4 @@ Name: "{group}\移除 primelive 濾鏡"; Filename: "{uninstallexe}"
 ; 先靜默安裝 OBS（會註冊「OBS Virtual Camera」虛擬攝影機，引擎需要它）
 Filename: "{tmp}\OBS-Studio-Installer.exe"; Parameters: "/S"; StatusMsg: "正在安裝 OBS（含虛擬攝影機，請稍候約 1 分鐘）…"; Flags: waituntilterminated
 ; 裝完直接進入一鍵開播（首次會問攝影機/麥克風與串流金鑰）
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\primestage\golive.ps1"""; Description: "立即開播（第一次會先選設備、貼串流金鑰）"; Flags: postinstall nowait skipifsilent
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\primestage\golive.ps1"""; Description: "立即開播（第一次會先選設備、貼串流金鑰）"; Flags: postinstall nowait skipifsilent

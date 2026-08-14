@@ -1,109 +1,113 @@
 ﻿# =============================================================================
-#  Prime Stage - 選我的攝影機 & 麥克風（每位主播設備不同，這裡挑一次就記住）
-#   - 攝影機：給濾鏡引擎用(引擎會開你選的那台)
-#   - 麥克風：寫進 OBS(直接進直播的聲音)；預設=系統預設麥克風(最保險，一定有音)
-#  選好存到 %APPDATA%\PrimeStage\devices.json，一鍵開播/設定都會自動套用。
+#  Prime Stage - 選攝影機 & 麥克風(GUI 視窗版,無主控台互動)
+#  存到 %APPDATA%\PrimeStage\devices.json;一鍵開播/設定會自動套用。
 # =============================================================================
 [CmdletBinding()]
-param([string]$EnginePath = "")
+param([string]$EnginePath = "")   # 保留參數相容,GUI 版不需要引擎
 $ErrorActionPreference = "Continue"
-try { chcp 65001 > $null } catch {}
-$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
 $cfgDir = Join-Path $env:APPDATA "PrimeStage"
 $cfgFile = Join-Path $cfgDir "devices.json"
 New-Item -ItemType Directory -Force -Path $cfgDir | Out-Null
 
-function Read-Num($prompt, $max) {
-    while ($true) {
-        $s = Read-Host $prompt
-        if ($s -match '^\d+$' -and [int]$s -le $max) { return [int]$s }
-        Write-Host "  請輸入 0 ~ $max 的數字。" -ForegroundColor Yellow
-    }
-}
+# ---- 攝影機清單(WMI;名稱與 DirectShow 相同,引擎用名稱比對) ----
+$cams = @()
+try {
+    $cams = Get-CimInstance Win32_PnPEntity -ErrorAction Stop |
+        Where-Object { $_.PNPClass -in @("Camera","Image") -and $_.Status -eq "OK" } |
+        Select-Object -ExpandProperty Name -Unique |
+        Where-Object { $_ -notmatch "OBS Virtual|Virtual Camera" }   # 排除虛擬相機(那是引擎輸出)
+} catch {}
 
-Write-Host "==== Prime Stage 選設備 ====" -ForegroundColor Cyan
-
-# ---------- 1) 攝影機（問引擎要清單）----------
-Write-Host "`n[攝影機] 掃描中..." -ForegroundColor Cyan
-$engine = @(
-    $EnginePath,
-    "$env:ProgramFiles\primelive-filter\primelive_filter.exe",
-    "${env:ProgramFiles(x86)}\primelive-filter\primelive_filter.exe",
-    (Join-Path $here "engine\primelive_filter.exe"),
-    (Join-Path $here "engine\primelive_filter\primelive_filter.exe"),
-    "F:\mcp\primelive\obs\engine\dist\primelive_filter\primelive_filter.exe"
-) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-$engArgs = @("--list-cameras")
-$engCwd = $here
-if (-not $engine) {
-    $devDir = "F:\mcp\primelive\obs\engine"; $py = Join-Path $devDir ".venv\Scripts\python.exe"
-    if ((Test-Path $py) -and (Test-Path (Join-Path $devDir "primelive_engine.py"))) {
-        $engine = $py; $engArgs = @("primelive_engine.py","--list-cameras"); $engCwd = $devDir
-    }
-}
-$camName = ""
-if ($engine) {
-    Push-Location $engCwd
-    $out = & $engine @engArgs 2>&1 | Out-String
-    Pop-Location
-    $cams = @()
-    foreach ($line in ($out -split "`r?`n")) {
-        if ($line -match '^\s*(\d+):\s*(.+?)(\s+<-.*)?\s*$') { $cams += ,@([int]$matches[1], $matches[2].Trim()) }
-    }
-    if ($cams.Count -gt 0) {
-        Write-Host "請選你的攝影機："
-        foreach ($c in $cams) { Write-Host ("   {0}: {1}" -f $c[0], $c[1]) }
-        Write-Host "   -1: 不指定(讓引擎自動挑)"
-        $sel = Read-Host "輸入編號"
-        if ($sel -match '^\d+$') {
-            $picked = $cams | Where-Object { $_[0] -eq [int]$sel } | Select-Object -First 1
-            if ($picked) { $camName = $picked[1]; Write-Host ("  已選攝影機：{0}" -f $camName) -ForegroundColor Green }
-        } else { Write-Host "  不指定，引擎會自動挑。" }
-    } else {
-        Write-Host "  抓不到攝影機清單(輸出如下)，先跳過，引擎會自動挑：" -ForegroundColor Yellow
-        Write-Host $out
-    }
-} else {
-    Write-Host "  找不到引擎，攝影機先跳過(引擎日後會自動挑)。" -ForegroundColor Yellow
-}
-
-# ---------- 2) 麥克風（列 Windows 錄音裝置）----------
-Write-Host "`n[麥克風] 掃描中..." -ForegroundColor Cyan
+# ---- 麥克風清單(登錄檔 Active 錄音端點) ----
 $base = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture"
 $fnKey = "{a45c254e-df1c-4efd-8020-67d146a850e0},2"
 $mics = @()
 Get-ChildItem $base -ErrorAction SilentlyContinue | ForEach-Object {
-    $guid = $_.PSChildName
     $state = (Get-ItemProperty $_.PSPath -Name DeviceState -ErrorAction SilentlyContinue).DeviceState
-    if ($state -ne 1) { return }   # 只列 Active(接著、可用)的
+    if ($state -ne 1) { return }
     $fn = (Get-ItemProperty (Join-Path $_.PSPath "Properties") -Name $fnKey -ErrorAction SilentlyContinue).$fnKey
-    $mics += ,@($fn, "{0.0.1.00000000}.$guid")
+    if ($fn) { $mics += ,@($fn, "{0.0.1.00000000}." + $_.PSChildName) }
 }
-Write-Host "請選麥克風(建議先用 0 系統預設，最保險)："
-Write-Host "   0: 系統預設麥克風(最保險，一定有音)"
-for ($i = 0; $i -lt $mics.Count; $i++) { Write-Host ("   {0}: {1}" -f ($i+1), $mics[$i][0]) }
-$msel = Read-Num "輸入編號" $mics.Count
-if ($msel -eq 0) { $micId = "default"; $micName = "系統預設麥克風" }
-else { $micId = $mics[$msel-1][1]; $micName = $mics[$msel-1][0] }
-Write-Host ("  已選麥克風：{0}" -f $micName) -ForegroundColor Green
 
-# ---------- 3) 存設定 ----------
-$cfg = [ordered]@{ cameraName = $camName; micId = $micId; micName = $micName }
+# ---- GUI ----
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "primelive 選設備"
+$form.Size = New-Object System.Drawing.Size(430, 260)
+$form.StartPosition = "CenterScreen"
+$form.FormBorderStyle = "FixedDialog"
+$form.MaximizeBox = $false; $form.MinimizeBox = $false
+$form.Font = New-Object System.Drawing.Font("Microsoft JhengHei UI", 10)
+
+$lbl1 = New-Object System.Windows.Forms.Label
+$lbl1.Text = "攝影機  Camera"
+$lbl1.Location = New-Object System.Drawing.Point(20, 20)
+$lbl1.AutoSize = $true
+$form.Controls.Add($lbl1)
+
+$cbCam = New-Object System.Windows.Forms.ComboBox
+$cbCam.DropDownStyle = "DropDownList"
+$cbCam.Location = New-Object System.Drawing.Point(20, 45)
+$cbCam.Size = New-Object System.Drawing.Size(375, 30)
+[void]$cbCam.Items.Add("(自動偵測,推薦)")
+foreach ($c in $cams) { [void]$cbCam.Items.Add($c) }
+$cbCam.SelectedIndex = 0
+$form.Controls.Add($cbCam)
+
+$lbl2 = New-Object System.Windows.Forms.Label
+$lbl2.Text = "麥克風  Microphone"
+$lbl2.Location = New-Object System.Drawing.Point(20, 85)
+$lbl2.AutoSize = $true
+$form.Controls.Add($lbl2)
+
+$cbMic = New-Object System.Windows.Forms.ComboBox
+$cbMic.DropDownStyle = "DropDownList"
+$cbMic.Location = New-Object System.Drawing.Point(20, 110)
+$cbMic.Size = New-Object System.Drawing.Size(375, 30)
+[void]$cbMic.Items.Add("(系統預設,最保險)")
+foreach ($m in $mics) { [void]$cbMic.Items.Add($m[0]) }
+$cbMic.SelectedIndex = 0
+$form.Controls.Add($cbMic)
+
+$btn = New-Object System.Windows.Forms.Button
+$btn.Text = "確定"
+$btn.Location = New-Object System.Drawing.Point(295, 165)
+$btn.Size = New-Object System.Drawing.Size(100, 34)
+$btn.DialogResult = [System.Windows.Forms.DialogResult]::OK
+$form.Controls.Add($btn)
+$form.AcceptButton = $btn
+
+# 帶入上次選擇
+if (Test-Path $cfgFile) {
+    try {
+        $prev = Get-Content $cfgFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($prev.cameraName) { $i = $cbCam.Items.IndexOf($prev.cameraName); if ($i -ge 0) { $cbCam.SelectedIndex = $i } }
+        if ($prev.micName)    { $i = $cbMic.Items.IndexOf($prev.micName);    if ($i -ge 0) { $cbMic.SelectedIndex = $i } }
+    } catch {}
+}
+
+if ($form.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit 0 }
+
+$camName = if ($cbCam.SelectedIndex -le 0) { "" } else { $cbCam.SelectedItem }
+if ($cbMic.SelectedIndex -le 0) { $micId = "default"; $micName = "系統預設麥克風" }
+else { $micId = $mics[$cbMic.SelectedIndex - 1][1]; $micName = $mics[$cbMic.SelectedIndex - 1][0] }
+
+$cfg = [ordered]@{ cameraName = "$camName"; micId = $micId; micName = $micName }
 [System.IO.File]::WriteAllText($cfgFile, ($cfg | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
-Write-Host "`n已存到 $cfgFile"
 
-# ---------- 4) 若 OBS 場景已存在，直接把麥克風套進去 ----------
+# 若 OBS 場景已存在,直接套用麥克風
 $sceneFile = Join-Path $env:APPDATA "obs-studio\basic\scenes\Prime Stage 直式.json"
 if (Test-Path $sceneFile) {
-    $j = Get-Content $sceneFile -Raw -Encoding UTF8
-    $idx = $j.IndexOf('"AuxAudioDevice1"')
-    if ($idx -ge 0) {
-        $head = $j.Substring(0, $idx); $tail = $j.Substring($idx)
-        $tail = ([regex]'"device_id":\s*"[^"]*"').Replace($tail, ('"device_id": "' + ($micId -replace '\\','\\') + '"'), 1)
-        [System.IO.File]::WriteAllText($sceneFile, ($head + $tail), (New-Object System.Text.UTF8Encoding($false)))
-        Write-Host "已把麥克風套進現有的 OBS 場景。" -ForegroundColor Green
-    }
-} else {
-    Write-Host "(OBS 還沒設定過；下次『一鍵開播』會自動套用你選的麥克風。)"
+    try {
+        $j = [System.IO.File]::ReadAllText($sceneFile, (New-Object System.Text.UTF8Encoding($false)))
+        $idx = $j.IndexOf('"AuxAudioDevice1"')
+        if ($idx -ge 0) {
+            $head = $j.Substring(0, $idx); $tail = $j.Substring($idx)
+            $tail = ([regex]'"device_id":\s*"[^"]*"').Replace($tail, ('"device_id": "' + $micId + '"'), 1)
+            [System.IO.File]::WriteAllText($sceneFile, ($head + $tail), (New-Object System.Text.UTF8Encoding($false)))
+        }
+    } catch {}
 }
-Write-Host "`n完成！可以關掉這個視窗了。" -ForegroundColor Green
+exit 0
