@@ -810,8 +810,27 @@ def build_strip_view(presets, thumbs, active, scroll, tw, th, status, demo_label
     return bgr, rects, max_scroll, H
 
 
-PV_W, PV_H = 640, 360                      # 即時畫面區(16:9)
-LIVE_BTN = (STRIP_VIEW_W - 228, STRIP_HDR + 128, STRIP_VIEW_W - 28, STRIP_HDR + 196)
+# 直播固定直式:攝影機一進管線就中央裁成 OBS 畫布比例(884:1920)。
+# 之後預覽/虛擬攝影機/OBS 全鏈路只有直式,且處理像素變少(防lag加分)。
+CANVAS_AR = 884.0 / 1920.0
+
+def crop_portrait(frame):
+    if frame is None:
+        return frame
+    h, w = frame.shape[:2]
+    tw_ = int(h * CANVAS_AR) // 2 * 2
+    if 2 <= tw_ < w:
+        x0 = (w - tw_) // 2
+        return np.ascontiguousarray(frame[:, x0:x0 + tw_])
+    th_ = int(w / CANVAS_AR) // 2 * 2
+    if 2 <= th_ < h:
+        y0 = (h - th_) // 2
+        return np.ascontiguousarray(frame[y0:y0 + th_, :])
+    return frame
+
+PV_H = 440
+PV_W = int(PV_H * CANVAS_AR) // 2 * 2      # ≈202,直式手機比例
+LIVE_BTN = (STRIP_VIEW_W - 228, STRIP_HDR + 168, STRIP_VIEW_W - 28, STRIP_HDR + 236)
 
 def build_main_view(presets, thumbs, active, scroll, tw, th, live, demo_label):
     """v7 主視窗:header + 即時畫面(中央) + 左資訊/右開播鈕 + 濾鏡條 + footer。
@@ -927,6 +946,106 @@ def build_main_view(presets, thumbs, active, scroll, tw, th, live, demo_label):
 
     bgr = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
     return bgr, rects, max_scroll, H, (pv_x, pv_y, PV_W, PV_H)
+
+
+# ---------- v8 手機式直式視窗:影像全幅+半透明浮層(自動隱藏濾鏡盤) ----------
+WIN_H = 940
+WIN_W = int(WIN_H * CANVAS_AR) // 2 * 2    # ≈432,整窗就是直式畫面
+TRAY_TW = 64                                # 濾鏡盤縮圖寬
+
+def _alpha_paste(dst_bgr, ov_rgba, x, y):
+    """把 RGBA 浮層(含半透明)貼到 BGR 畫面上。"""
+    h, w = ov_rgba.shape[:2]
+    x = int(x); y = int(y)
+    if x >= dst_bgr.shape[1] or y >= dst_bgr.shape[0]:
+        return
+    w = min(w, dst_bgr.shape[1] - x); h = min(h, dst_bgr.shape[0] - y)
+    roi = dst_bgr[y:y + h, x:x + w].astype(np.float32)
+    ov = ov_rgba[:h, :w].astype(np.float32)
+    a = ov[..., 3:4] / 255.0
+    dst_bgr[y:y + h, x:x + w] = (roi * (1 - a) + ov[..., 2::-1] * a).astype(np.uint8)
+
+def _rgba(pil_img):
+    return np.array(pil_img.convert("RGBA"))
+
+def build_topbar(cur, demo_label, live):
+    """頂部半透明資訊列:品牌+目前濾鏡+示範chip+直播狀態。"""
+    H = 48
+    im = PILImage.new("RGBA", (WIN_W, H), (10, 10, 14, 150))
+    d = PILDraw.Draw(im)
+    zhb = lambda s: _uifont("zhb", s); zh = lambda s: _uifont("zh", s); ensb = lambda s: _uifont("ensb", s)
+    d.text((10, 6), "primelive", font=ensb(12), fill=(233, 193, 122, 255))
+    d.text((10, 26), cur.get("name", "") + " · " + cur.get("en", ""), font=zh(9), fill=(250, 214, 166, 255))
+    if live.get("streaming"):
+        d.ellipse([WIN_W - 16, 9, WIN_W - 8, 17], fill=(235, 70, 60, 255))
+        d.text((WIN_W - 22, 7), "LIVE", font=ensb(9), fill=(255, 120, 110, 255), anchor="ra")
+    if demo_label:
+        d.rounded_rectangle([WIN_W - 96, 26, WIN_W - 8, 44], radius=9, fill=(255, 255, 255, 36))
+        d.text((WIN_W - 52, 35), demo_label, font=zh(8.5), fill=(255, 235, 210, 255), anchor="mm")
+    return _rgba(im)
+
+def build_tray(presets, thumbs, active, scroll, tw, th):
+    """底部半透明濾鏡盤(可捲動);回傳 (RGBA, 局部命中矩形, max_scroll, 高)。"""
+    PAD = 10; GAP = 6; LBL = 24
+    H = 12 + th + LBL
+    n = len(presets)
+    content_w = PAD * 2 + n * tw + (n - 1) * GAP
+    max_scroll = max(0, content_w - WIN_W)
+    scroll = int(max(0, min(scroll, max_scroll)))
+    im = PILImage.new("RGBA", (WIN_W, H), (0, 0, 0, 0))
+    d = PILDraw.Draw(im)
+    d.rounded_rectangle([0, 0, WIN_W, H + 14], radius=14, fill=(12, 12, 18, 165))
+    zhb = lambda s: _uifont("zhb", s); zh = lambda s: _uifont("zh", s)
+    rects = []
+    ty = 8
+    for i, p in enumerate(presets):
+        x = PAD + i * (tw + GAP) - scroll
+        if x + tw < 0 or x > WIN_W:
+            continue
+        on = (i == active)
+        tb = thumbs[i]
+        if tb is not None:
+            t = PILImage.fromarray(cv2.cvtColor(cv2.resize(tb, (tw, th)), cv2.COLOR_BGR2RGB)).convert("RGBA")
+            mask = PILImage.new("L", (tw, th), 0)
+            PILDraw.Draw(mask).rounded_rectangle([0, 0, tw - 1, th - 1], radius=8, fill=255)
+            t.putalpha(mask)
+            im.paste(t, (int(x), ty), t)
+        else:
+            d.rounded_rectangle([x, ty, x + tw, ty + th], radius=8, fill=(38, 40, 50, 200))
+        if on:
+            d.rounded_rectangle([x - 1, ty - 1, x + tw + 1, ty + th + 1], radius=9,
+                                outline=(240, 164, 96, 255), width=2)
+        nm = p.get("name", "")
+        d.text((x + tw / 2, ty + th + 3), nm, font=zhb(8.6) if on else zh(8.6),
+               fill=(255, 220, 170, 255) if on else (235, 236, 240, 220), anchor="ma")
+        rects.append((int(x), ty, int(x + tw), ty + th, i))
+    return _rgba(im), rects, max_scroll, H
+
+def build_livebtn(live):
+    """浮動「開始直播」膠囊鈕(半透明)。"""
+    W, H = 176, 46
+    im = PILImage.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = PILDraw.Draw(im)
+    zhb = lambda s: _uifont("zhb", s)
+    if live.get("busy"):
+        d.rounded_rectangle([0, 0, W, H], radius=23, fill=(70, 74, 86, 210))
+        d.text((W / 2, H / 2), "處理中…", font=zhb(13), fill=(220, 222, 228, 255), anchor="mm")
+    elif live.get("streaming"):
+        d.rounded_rectangle([0, 0, W, H], radius=23, fill=(40, 42, 52, 205), outline=(150, 156, 168, 180), width=1)
+        d.text((W / 2, H / 2), "■ 停止直播", font=zhb(14), fill=(255, 170, 160, 255), anchor="mm")
+    else:
+        d.rounded_rectangle([0, 0, W, H], radius=23, fill=(212, 60, 52, 225))
+        d.text((W / 2, H / 2), "● 開始直播", font=zhb(14), fill=(255, 246, 243, 255), anchor="mm")
+    return _rgba(im)
+
+def build_handle():
+    """濾鏡盤收起後的喚醒把手。"""
+    W, H = 96, 22
+    im = PILImage.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = PILDraw.Draw(im)
+    d.rounded_rectangle([0, 0, W, H], radius=11, fill=(12, 12, 18, 140))
+    d.text((W / 2, H / 2), "︿ 濾鏡", font=_uifont("zh", 9), fill=(240, 242, 246, 230), anchor="mm")
+    return _rgba(im)
 
 
 # ---------- 鏡頭選擇（用名稱挑 OBSBOT，永不誤開手機/連線相機）----------
@@ -1208,6 +1327,7 @@ def main():
     if cap is None:
         print("[錯誤] 找不到可用的攝影機。請確認 OBSBOT 已接上、沒被其他程式佔用。")
         sys.exit(3)
+    frame = crop_portrait(frame)     # 直播固定直式:輸出尺寸以裁切後為準
     H, W = frame.shape[:2]
     print("[ok] 攝影機 %dx%d，濾鏡 %d 個。左右滑動/←→ 切換，關閉視窗離開。" % (W, H, len(presets)))
 
@@ -1228,10 +1348,13 @@ def main():
     print("[ok] 防lag：背景抓圖=%s，自動調解析度=%s（目標 %d fps，下限 %.0f%%）"
           % ("開" if threaded else "關", "開" if not args.no_adaptive else "關", args.target_fps, args.min_scale * 100))
 
-    # v6 選擇器:單排可捲動;縮圖=內建示範模特(女/男可切),主畫面請看 OBS 預覽
+    # v8 手機式直式視窗:影像全幅+半透明浮層,濾鏡盤閒置自動收合
     ui = {"active": active, "scroll": 0, "rects": [], "dirty": True, "drag": None,
-          "moved": False, "demo": "f", "toggle": False}
-    strip_tw = STRIP_TW
+          "moved": False, "demo": "f", "toggle": False, "live_toggle": False,
+          "last_act": time.time(), "tray_vis": 1.0,
+          "btn_rect": (0, 0, 0, 0), "handle_rect": (0, 0, 0, 0),
+          "chip_rect": (WIN_W - 96, 26, WIN_W - 8, 44)}
+    strip_tw = TRAY_TW
     demo_imgs = {}
     for g, fn in (("f", "demo_female.png"), ("m", "demo_male.png")):
         im = cv2.imread(os.path.join(ASSETS, fn), cv2.IMREAD_COLOR)
@@ -1239,18 +1362,19 @@ def main():
             demo_imgs[g] = im
     if demo_imgs:
         dh, dw = demo_imgs["f" if "f" in demo_imgs else list(demo_imgs)[0]].shape[:2]
-        strip_th = max(40, int(STRIP_TW * dh / float(dw)))
+        strip_th = max(40, int(strip_tw * dh / float(dw)))
     else:
-        strip_th = max(30, int(STRIP_TW * H / float(W)))     # 沒示範圖才退回攝影機比例
+        strip_th = min(100, max(40, int(strip_tw * H / float(W))))   # 後備:裁切後(直式)比例,設上限
+        ui["demo"] = "live"
     thumbs_map = {g: [None] * len(presets) for g in (demo_imgs or {"live": None})}
     worker = ThumbWorker(presets, ASSETS)
     obs_ctl = ObsControl()
-    ui["live_toggle"] = False
     WIN = "primelive"    # OpenCV 視窗標題不支援中文(會亂碼),用純英文
     if not args.no_window:
         def _on_mouse(event, x, y, flags, param):
+            ui["last_act"] = time.time()          # 任何滑鼠動作=喚醒濾鏡盤
             if event == cv2.EVENT_MOUSEWHEEL:
-                step = (strip_tw + STRIP_GAP) * 2
+                step = (strip_tw + 6) * 2
                 ui["scroll"] += -step if flags > 0 else step
                 ui["dirty"] = True
             elif event == cv2.EVENT_LBUTTONDOWN:
@@ -1263,10 +1387,12 @@ def main():
                     ui["dirty"] = True
             elif event == cv2.EVENT_LBUTTONUP:
                 if ui["drag"] is not None and not ui["moved"]:
-                    if (LIVE_BTN[0] <= x <= LIVE_BTN[2]) and (LIVE_BTN[1] <= y <= LIVE_BTN[3]):
+                    bx0, by0, bx1, by1 = ui["btn_rect"]
+                    cx0, cy0, cx1, cy1 = ui["chip_rect"]
+                    if bx0 <= x <= bx1 and by0 <= y <= by1:
                         ui["live_toggle"] = True     # 開始/停止直播
-                    elif (DEMO_CHIP[0] <= x <= DEMO_CHIP[2]) and (y <= STRIP_HDR):
-                        ui["toggle"] = True          # 右上 chip:切換示範模特
+                    elif cx0 <= x <= cx1 and cy0 <= y <= cy1:
+                        ui["toggle"] = True          # 示範模特切換
                     else:
                         for (x0, y0, x1, y1, idx) in ui["rects"]:
                             if x0 <= x < x1 and y0 <= y < y1:
@@ -1309,6 +1435,7 @@ def main():
 
             res = None
             if is_new:
+                frame = crop_portrait(frame)     # 直式鏈路:進管線先裁
                 t_proc = time.time()
                 # 自動調解析度：在縮小後的畫面跑整條管線，最後再放大送出
                 pw, ph = adap.proc_size(OUT_W, OUT_H)
@@ -1378,7 +1505,7 @@ def main():
             cam.sleep_until_next_frame()
 
             if not args.no_window:
-                # 右上 chip:切換示範模特(女/男);該組還沒生成就背景生成
+                # 示範模特切換;該組還沒生成就背景生成
                 if ui["toggle"]:
                     ui["toggle"] = False
                     order_g = [g for g in ("f", "m") if g in demo_imgs]
@@ -1388,6 +1515,10 @@ def main():
                         if thumbs_map[g][0] is None and not worker.busy:
                             worker.start(demo_imgs[g], strip_tw, strip_th, thumbs_map[g])
                         ui["dirty"] = True
+                # 後備:沒示範圖時用(已裁直式的)攝影機畫面生縮圖
+                if (not demo_imgs) and is_new and n == 8 and not worker.busy \
+                        and thumbs_map.get("live") and thumbs_map["live"][0] is None:
+                    worker.start(frame, strip_tw, strip_th, thumbs_map["live"])
                 # 開始/停止直播(遙控背景 OBS,不卡輸出)
                 if ui.get("live_toggle"):
                     ui["live_toggle"] = False
@@ -1395,42 +1526,68 @@ def main():
                     ui["dirty"] = True
                 if n == 30 or (n % 240 == 0):     # 定期同步 OBS 狀態(~8秒)
                     obs_ctl.poll_async()
-                # 縮圖進度/狀態改變才重繪 chrome;即時畫面每格貼上
+                # 浮層快取(髒/縮圖進度/直播狀態變了才重建)
                 lstate = (obs_ctl.streaming, obs_ctl.connected, obs_ctl.busy)
                 ver = worker.version
                 if ui["dirty"] or ver != ui.get("_ver") or lstate != ui.get("_ls"):
+                    live = {"streaming": lstate[0], "connected": lstate[1], "busy": lstate[2]}
                     demo_label = ""
                     if len(demo_imgs) > 1:
                         demo_label = "示範:女→男" if ui["demo"] == "f" else "示範:男→女"
                     cur_thumbs = thumbs_map.get(ui["demo"]) or worker.thumbs
-                    live = {"streaming": lstate[0], "connected": lstate[1], "busy": lstate[2]}
-                    chrome, rects, max_sc, _, pv_slot = build_main_view(
-                        presets, cur_thumbs, ui["active"], ui["scroll"],
-                        strip_tw, strip_th, live, demo_label)
+                    tray, trects, max_sc, tray_h = build_tray(presets, cur_thumbs,
+                                                              ui["active"], ui["scroll"],
+                                                              strip_tw, strip_th)
                     ui["scroll"] = max(0, min(ui["scroll"], max_sc))
-                    ui["rects"] = rects
-                    ui["_ver"] = ver
-                    ui["_ls"] = lstate
-                    ui["chrome"] = chrome
-                    ui["pv"] = pv_slot
+                    ui["_tray"] = tray; ui["_trects"] = trects; ui["_tray_h"] = tray_h
+                    ui["_top"] = build_topbar(presets[ui["active"]], demo_label, live)
+                    ui["_btn"] = build_livebtn(live)
+                    ui["_handle"] = build_handle()
+                    ui["_ver"] = ver; ui["_ls"] = lstate
                     ui["dirty"] = False
-                if ui.get("chrome") is not None:
-                    view = ui["chrome"].copy()
-                    if last_full is not None and ui.get("pv"):
-                        px0, py0, pw_, ph_ = ui["pv"]
-                        view[py0:py0 + ph_, px0:px0 + pw_] = cv2.resize(
-                            cv2.cvtColor(last_full, cv2.COLOR_RGB2BGR), (pw_, ph_))
-                    cv2.imshow(WIN, view)
+                # 閒置 3 秒自動收合;任何操作喚醒(緩動動畫)
+                target = 0.0 if (time.time() - ui["last_act"] > 3.0) else 1.0
+                ui["tray_vis"] += (target - ui["tray_vis"]) * 0.22
+                tv = max(0.0, min(1.0, ui["tray_vis"]))
+                # 每格合成:直式畫面全幅 + 半透明浮層
+                if last_full is not None:
+                    view = cv2.resize(cv2.cvtColor(last_full, cv2.COLOR_RGB2BGR), (WIN_W, WIN_H))
+                else:
+                    view = np.full((WIN_H, WIN_W, 3), 16, np.uint8)
+                if ui.get("_top") is not None:
+                    _alpha_paste(view, ui["_top"], 0, 0)
+                    tray_h = ui.get("_tray_h", 100)
+                    tray_y = WIN_H - int(tray_h * tv)
+                    if tv > 0.02:
+                        _alpha_paste(view, ui["_tray"], 0, tray_y)
+                        ui["rects"] = [(x0, y0 + tray_y, x1, y1 + tray_y, i)
+                                       for (x0, y0, x1, y1, i) in ui.get("_trects", [])]
+                    else:
+                        ui["rects"] = []
+                    if tv < 0.5:
+                        hb = ui["_handle"]
+                        hx = (WIN_W - hb.shape[1]) // 2; hy = WIN_H - hb.shape[0] - 6
+                        _alpha_paste(view, hb, hx, hy)
+                        ui["handle_rect"] = (hx, hy, hx + hb.shape[1], hy + hb.shape[0])
+                    else:
+                        ui["handle_rect"] = (0, 0, 0, 0)
+                    btn = ui["_btn"]
+                    bx = (WIN_W - btn.shape[1]) // 2
+                    by = (tray_y - btn.shape[0] - 10) if tv > 0.02 else (WIN_H - btn.shape[0] - 34)
+                    _alpha_paste(view, btn, bx, by)
+                    ui["btn_rect"] = (bx, by, bx + btn.shape[1], by + btn.shape[0])
+                cv2.imshow(WIN, view)
                 # 鍵盤只有 ← →(其餘交給滑鼠);關閉視窗(X)= 離開
                 k = cv2.waitKeyEx(1)
-                if k in (2424832, 2555904):       # ← →:上/下一個,並自動捲到可見
+                if k in (2424832, 2555904):
+                    ui["last_act"] = time.time()
                     step = -1 if k == 2424832 else 1
                     ui["active"] = (ui["active"] + step) % len(presets)
-                    tx = STRIP_PAD + ui["active"] * (strip_tw + STRIP_GAP)
-                    if tx - ui["scroll"] < STRIP_PAD:
-                        ui["scroll"] = tx - STRIP_PAD
-                    elif tx - ui["scroll"] + strip_tw > STRIP_VIEW_W - STRIP_PAD:
-                        ui["scroll"] = tx + strip_tw - STRIP_VIEW_W + STRIP_PAD
+                    tx = 10 + ui["active"] * (strip_tw + 6)
+                    if tx - ui["scroll"] < 10:
+                        ui["scroll"] = tx - 10
+                    elif tx - ui["scroll"] + strip_tw > WIN_W - 10:
+                        ui["scroll"] = tx + strip_tw - WIN_W + 10
                     ui["dirty"] = True
                 try:
                     if cv2.getWindowProperty(WIN, cv2.WND_PROP_VISIBLE) < 1:
