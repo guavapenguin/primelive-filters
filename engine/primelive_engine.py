@@ -567,11 +567,13 @@ class ThumbWorker:
         self._lm = None
         self._seg = None
 
-    def start(self, frame_bgr, tw, th):
+    def start(self, frame_bgr, tw, th, out_list=None):
         if self.busy or frame_bgr is None:
             return
         self.busy = True
-        threading.Thread(target=self._run, args=(frame_bgr.copy(), tw, th), daemon=True).start()
+        if out_list is None:
+            out_list = self.thumbs
+        threading.Thread(target=self._run, args=(frame_bgr.copy(), tw, th, out_list), daemon=True).start()
 
     def _ensure_models(self):
         import mediapipe as mp
@@ -587,7 +589,7 @@ class ThumbWorker:
                     running_mode=vision.RunningMode.IMAGE, output_confidence_masks=True))
         return mp
 
-    def _run(self, frame, tw, th):
+    def _run(self, frame, tw, th, out_list):
         try:
             mp = self._ensure_models()
             h0, w0 = frame.shape[:2]
@@ -622,8 +624,8 @@ class ThumbWorker:
                     else:
                         cx, cy, twd, ang = crown_placement(lms, W, H)
                     out = overlay(out, load_sticker(os.path.join(self.assets, p["sticker"])), cx, cy, twd, ang)
-                self.thumbs[i] = cv2.resize(cv2.cvtColor(out, cv2.COLOR_RGB2BGR), (tw, th),
-                                            interpolation=cv2.INTER_AREA)
+                out_list[i] = cv2.resize(cv2.cvtColor(out, cv2.COLOR_RGB2BGR), (tw, th),
+                                         interpolation=cv2.INTER_AREA)
                 self.version += 1
         except Exception as e:
             print("[note] 縮圖產生失敗: %s %s" % (type(e).__name__, e))
@@ -631,7 +633,9 @@ class ThumbWorker:
             self.busy = False
 
 
-def build_strip_view(presets, thumbs, active, scroll, tw, th, status):
+DEMO_CHIP = (STRIP_VIEW_W - 318, 4, STRIP_VIEW_W - 246, STRIP_HDR - 4)   # 右上「示範:女/男」點擊區
+
+def build_strip_view(presets, thumbs, active, scroll, tw, th, status, demo_label=""):
     """畫單排選擇器視圖(可捲動視窗)。回傳 (BGR, 命中矩形, max_scroll, 視窗高)。"""
     n = len(presets)
     content_w = STRIP_PAD * 2 + n * tw + (n - 1) * STRIP_GAP
@@ -655,6 +659,10 @@ def build_strip_view(presets, thumbs, active, scroll, tw, th, status):
     d.text((STRIP_VIEW_W / 2, STRIP_HDR / 2), "目前 %s · %s" % (cur.get("name", ""), cur.get("en", "")),
            font=zh(10), fill=(250, 214, 166), anchor="mm")
     d.text((STRIP_VIEW_W - STRIP_PAD, STRIP_HDR / 2), status, font=en(9), fill=SUB, anchor="rm")
+    if demo_label:
+        d.rounded_rectangle(list(DEMO_CHIP), radius=10, outline=(120, 127, 142), width=1)
+        d.text(((DEMO_CHIP[0] + DEMO_CHIP[2]) / 2, STRIP_HDR / 2), demo_label, font=zh(9),
+               fill=(250, 214, 166), anchor="mm")
 
     ty = STRIP_HDR + STRIP_TAGH
     rects = []
@@ -679,11 +687,6 @@ def build_strip_view(presets, thumbs, active, scroll, tw, th, status):
             d.text((x + tw / 2, ty + th / 2), "更新中", font=zh(8), fill=DIM, anchor="mm")
         if on:
             d.rounded_rectangle([x, ty, x + tw, ty + th], radius=6, outline=ACCENT, width=2)
-        if p.get("key"):
-            kb = p["key"].upper()
-            kw = d.textlength(kb, font=ensb(7)) + 7
-            d.rounded_rectangle([x + tw - kw - 2, ty + 2, x + tw - 2, ty + 13], radius=3, fill=(0, 0, 0, 150))
-            d.text((x + tw - kw / 2 - 2, ty + 7.5), kb, font=ensb(7), fill=(232, 234, 240), anchor="mm")
         d.text((x + tw / 2, ty + th + 2), p.get("name", ""), font=zhb(9) if on else zh(9),
                fill=(250, 214, 166) if on else TXT, anchor="ma")
         enl = p.get("en", "")
@@ -708,7 +711,7 @@ def build_strip_view(presets, thumbs, active, scroll, tw, th, status):
     d.rounded_rectangle([bar_x, sy, bar_x + bar_w, sy + STRIP_SBH - 2], radius=2, fill=(88, 95, 110))
 
     fy = H - STRIP_FOOT - 1
-    d.text((STRIP_PAD, fy), "滾輪/拖曳捲動 · 點縮圖或快捷鍵切換 · ←→ 上/下一個 · R 更新縮圖 · N 換攝影機 · Q 離開",
+    d.text((STRIP_PAD, fy), "左右滑動或 ← → 換濾鏡 · 點縮圖直接選 · 右上可切換示範模特(女/男)",
            font=zh(8.2), fill=SUB)
     bgr = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
     return bgr, rects, max_scroll, H
@@ -994,7 +997,7 @@ def main():
         print("[錯誤] 找不到可用的攝影機。請確認 OBSBOT 已接上、沒被其他程式佔用。")
         sys.exit(3)
     H, W = frame.shape[:2]
-    print("[ok] 攝影機 %dx%d，濾鏡 %d 個。數字鍵切換，q 離開。" % (W, H, len(presets)))
+    print("[ok] 攝影機 %dx%d，濾鏡 %d 個。左右滑動/←→ 切換，關閉視窗離開。" % (W, H, len(presets)))
 
     import pyvirtualcam
     OUT_W, OUT_H = W, H                       # 虛擬攝影機固定用第一格的尺寸
@@ -1013,12 +1016,23 @@ def main():
     print("[ok] 防lag：背景抓圖=%s，自動調解析度=%s（目標 %d fps，下限 %.0f%%）"
           % ("開" if threaded else "關", "開" if not args.no_adaptive else "關", args.target_fps, args.min_scale * 100))
 
-    # v6 選擇器狀態:單排可捲動;主畫面請看 OBS 預覽
-    ui = {"active": active, "scroll": 0, "rects": [], "dirty": True, "drag": None, "moved": False}
+    # v6 選擇器:單排可捲動;縮圖=內建示範模特(女/男可切),主畫面請看 OBS 預覽
+    ui = {"active": active, "scroll": 0, "rects": [], "dirty": True, "drag": None,
+          "moved": False, "demo": "f", "toggle": False}
     strip_tw = STRIP_TW
-    strip_th = max(30, int(STRIP_TW * H / float(W)))     # 縮圖同攝影機比例
+    demo_imgs = {}
+    for g, fn in (("f", "demo_female.png"), ("m", "demo_male.png")):
+        im = cv2.imread(os.path.join(ASSETS, fn), cv2.IMREAD_COLOR)
+        if im is not None:
+            demo_imgs[g] = im
+    if demo_imgs:
+        dh, dw = demo_imgs["f" if "f" in demo_imgs else list(demo_imgs)[0]].shape[:2]
+        strip_th = max(40, int(STRIP_TW * dh / float(dw)))
+    else:
+        strip_th = max(30, int(STRIP_TW * H / float(W)))     # 沒示範圖才退回攝影機比例
+    thumbs_map = {g: [None] * len(presets) for g in (demo_imgs or {"live": None})}
     worker = ThumbWorker(presets, ASSETS)
-    WIN = "primelive 一鍵濾鏡"
+    WIN = "primelive"    # OpenCV 視窗標題不支援中文(會亂碼),用純英文
     if not args.no_window:
         def _on_mouse(event, x, y, flags, param):
             if event == cv2.EVENT_MOUSEWHEEL:
@@ -1035,12 +1049,18 @@ def main():
                     ui["dirty"] = True
             elif event == cv2.EVENT_LBUTTONUP:
                 if ui["drag"] is not None and not ui["moved"]:
-                    for (x0, y0, x1, y1, idx) in ui["rects"]:
-                        if x0 <= x < x1 and y0 <= y < y1:
-                            ui["active"] = idx; ui["dirty"] = True
+                    if (DEMO_CHIP[0] <= x <= DEMO_CHIP[2]) and (y <= STRIP_HDR):
+                        ui["toggle"] = True          # 右上 chip:切換示範模特
+                    else:
+                        for (x0, y0, x1, y1, idx) in ui["rects"]:
+                            if x0 <= x < x1 and y0 <= y < y1:
+                                ui["active"] = idx; ui["dirty"] = True
                 ui["drag"] = None
         cv2.namedWindow(WIN, cv2.WINDOW_AUTOSIZE)
         cv2.setMouseCallback(WIN, _on_mouse)
+        # 開場就用示範圖生成縮圖(不等攝影機)
+        if demo_imgs:
+            worker.start(demo_imgs[ui["demo"]], strip_tw, strip_th, thumbs_map[ui["demo"]])
 
     n = 0
     t0 = time.time()
@@ -1142,25 +1162,35 @@ def main():
             cam.sleep_until_next_frame()
 
             if not args.no_window:
-                # 開播後第一次有畫面 → 自動生成縮圖(背景執行緒,不卡輸出)
-                if is_new and n == 8 and worker.thumbs[0] is None and not worker.busy:
-                    worker.start(frame, strip_tw, strip_th)
+                # 右上 chip:切換示範模特(女/男);該組還沒生成就背景生成
+                if ui["toggle"]:
+                    ui["toggle"] = False
+                    order_g = [g for g in ("f", "m") if g in demo_imgs]
+                    if len(order_g) > 1:
+                        ui["demo"] = order_g[(order_g.index(ui["demo"]) + 1) % len(order_g)]
+                        g = ui["demo"]
+                        if thumbs_map[g][0] is None and not worker.busy:
+                            worker.start(demo_imgs[g], strip_tw, strip_th, thumbs_map[g])
+                        ui["dirty"] = True
                 # 縮圖進度或狀態改變才重繪(省 CPU)
                 ver = worker.version
                 if ui["dirty"] or ver != ui.get("_ver") or (n % 30 == 0):
-                    status = "OBS Virtual Camera ● %.0ffps · 畫質%.0f%%" % (min(fps_ema, args.target_fps), adap.scale * 100)
-                    view, rects, max_sc, _ = build_strip_view(presets, worker.thumbs, ui["active"],
-                                                              ui["scroll"], strip_tw, strip_th, status)
+                    status = "OBS Virtual Camera ● %.0ffps" % min(fps_ema, args.target_fps)
+                    demo_label = ""
+                    if len(demo_imgs) > 1:
+                        demo_label = "示範:女→男" if ui["demo"] == "f" else "示範:男→女"
+                    cur_thumbs = thumbs_map.get(ui["demo"]) or worker.thumbs
+                    view, rects, max_sc, _ = build_strip_view(presets, cur_thumbs, ui["active"],
+                                                              ui["scroll"], strip_tw, strip_th,
+                                                              status, demo_label)
                     ui["scroll"] = max(0, min(ui["scroll"], max_sc))
                     ui["rects"] = rects
                     ui["_ver"] = ver
                     ui["dirty"] = False
                     cv2.imshow(WIN, view)
+                # 鍵盤只有 ← →(其餘交給滑鼠);關閉視窗(X)= 離開
                 k = cv2.waitKeyEx(1)
-                kc = k & 0xFF if k > 0 else -1
-                if kc in (ord("q"), ord("Q")):
-                    break
-                elif k in (2424832, 2555904):     # ← →:上/下一個,並自動捲到可見
+                if k in (2424832, 2555904):       # ← →:上/下一個,並自動捲到可見
                     step = -1 if k == 2424832 else 1
                     ui["active"] = (ui["active"] + step) % len(presets)
                     tx = STRIP_PAD + ui["active"] * (strip_tw + STRIP_GAP)
@@ -1169,49 +1199,11 @@ def main():
                     elif tx - ui["scroll"] + strip_tw > STRIP_VIEW_W - STRIP_PAD:
                         ui["scroll"] = tx + strip_tw - STRIP_VIEW_W + STRIP_PAD
                     ui["dirty"] = True
-                elif kc in (ord("r"), ord("R")):  # 用最新畫面重生縮圖
-                    worker.start(frame, strip_tw, strip_th)
-                    ui["dirty"] = True
-                elif kc in (ord("="), ord("+")) and "scale" in presets[ui["active"]]:
-                    presets[ui["active"]]["scale"] = round(presets[ui["active"]]["scale"] + 0.1, 2)
-                    print("  scale =", presets[ui["active"]]["scale"])
-                elif kc == ord("-") and "scale" in presets[ui["active"]]:
-                    presets[ui["active"]]["scale"] = round(presets[ui["active"]]["scale"] - 0.1, 2)
-                    print("  scale =", presets[ui["active"]]["scale"])
-                elif kc == ord("]") and presets[ui["active"]].get("anchor") == "head":
-                    presets[ui["active"]]["y_off"] = round(presets[ui["active"]].get("y_off", -0.15) + 0.02, 3)
-                    print("  y_off =", presets[ui["active"]]["y_off"])
-                elif kc == ord("[") and presets[ui["active"]].get("anchor") == "head":
-                    presets[ui["active"]]["y_off"] = round(presets[ui["active"]].get("y_off", -0.15) - 0.02, 3)
-                    print("  y_off =", presets[ui["active"]]["y_off"])
-                elif kc == ord("o"):
-                    with open(filters_path, "w", encoding="utf-8") as f:
-                        json.dump({"presets": presets}, f, ensure_ascii=False, indent=2)
-                    print("  已存回 filters.json")
-                elif kc == ord("n"):   # 切換到下一個可用攝影機(永遠跳過手機/連線相機)
-                    nxt, newcap = args.camera, None
-                    for _ in range(6):
-                        nxt = (nxt + 1) % 6
-                        if cam_names and nxt < len(cam_names) and _is_phone(cam_names[nxt]) and not args.allow_phone:
-                            continue
-                        newcap, _ = open_cam(nxt)
-                        if newcap is not None:
-                            break
-                    if newcap is not None:
-                        args.camera = nxt
-                        if threaded:
-                            reader.swap(newcap)
-                        else:
-                            cap.release(); cap = newcap
-                        seg_state = None
-                        print("  -> 切換攝影機 camera", nxt)
-                    else:
-                        print("  找不到其他攝影機")
-                elif kc > 0:
-                    for i, pr in enumerate(presets):
-                        if pr.get("key") and kc == ord(pr["key"]):
-                            ui["active"] = i
-                            ui["dirty"] = True
+                try:
+                    if cv2.getWindowProperty(WIN, cv2.WND_PROP_VISIBLE) < 1:
+                        break
+                except Exception:
+                    pass
 
             if args.frames and n >= args.frames:
                 faces = 1 if (res and res.face_landmarks) else 0
