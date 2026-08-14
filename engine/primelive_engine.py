@@ -166,7 +166,7 @@ def slim_face(rgb, pts, strength):
     cx = float(pts[:, 0].mean())
     ymin, ymax = float(pts[:, 1].min()), float(pts[:, 1].max())
     x, y, wf, hf = cv2.boundingRect(pts.astype(np.int32))
-    pad = int(0.2 * max(wf, hf))
+    pad = int(0.35 * max(wf, hf))     # ROI 加大,留羽化空間
     X0, Y0 = max(0, x - pad), max(0, y - pad)
     X1, Y1 = min(W, x + wf + pad), min(H, y + hf + pad)
     if X1 <= X0 or Y1 <= Y0:
@@ -174,7 +174,12 @@ def slim_face(rgb, pts, strength):
     ys, xs = np.mgrid[Y0:Y1, X0:X1].astype(np.float32)
     span = max(1.0, (ymax - ymin) * 0.7)
     vw = np.clip((ys - (ymin + (ymax - ymin) * 0.3)) / span, 0.0, 1.0)  # 下半臉權重高
-    map_x = (xs + (xs - cx) * strength * vw - X0).astype(np.float32)
+    # ROI 邊界羽化:位移量在距框緣 pad 內線性淡出到 0,避免 remap 框邊出現接縫
+    fade = max(1.0, float(pad))
+    edge = np.minimum(np.minimum(xs - X0, (X1 - 1) - xs),
+                      np.minimum(ys - Y0, (Y1 - 1) - ys))
+    ew = np.clip(edge / fade, 0.0, 1.0)
+    map_x = (xs + (xs - cx) * strength * vw * ew - X0).astype(np.float32)
     map_y = (ys - Y0).astype(np.float32)
     warped = cv2.remap(rgb[Y0:Y1, X0:X1], map_x, map_y,
                        interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
@@ -216,8 +221,8 @@ def _smooth_region(roi, lmask, d=11, s=60):
 
 def apply_beauty(rgb, lms, params):
     """化妝管線。params 可含：
-       smooth 磨皮、wrinkle 魚尾紋/眼下細紋、brighten_eyes 亮眼、
-       lipstick[r,g,b]+lip_strength 唇彩、blush[r,g,b]+blush_strength 腮紅、
+       smooth 磨皮、whiten 美白、wrinkle 魚尾紋/眼下細紋、brighten_eyes 亮眼、
+       eye 大眼(細緻)、lipstick[r,g,b]+lip_strength 唇彩、blush[r,g,b]+blush_strength 腮紅、
        contour 修容、slim 瘦臉。缺哪個鍵＝該效果關閉，向後相容舊 preset。"""
     if not isinstance(params, dict):
         params = {"smooth": float(params)}
@@ -228,8 +233,10 @@ def apply_beauty(rgb, lms, params):
     out = rgb.copy()
 
     smooth = float(params.get("smooth", 0.0))
+    whiten = float(params.get("whiten", 0.0))
     wrinkle = float(params.get("wrinkle", 0.0))
     brighten = float(params.get("brighten_eyes", 0.0))
+    eye_big = float(params.get("eye", 0.0))
     contour = float(params.get("contour", 0.0))
     slim = float(params.get("slim", 0.0))
 
@@ -244,6 +251,21 @@ def apply_beauty(rgb, lms, params):
             cv2.fillConvexPoly(m, cv2.convexHull((pts - [X0, Y0]).astype(np.int32)), 1.0)
             m = cv2.GaussianBlur(m, (0, 0), 8.0) * smooth
             out[Y0:Y1, X0:X1] = _smooth_region(out[Y0:Y1, X0:X1], m, d=9, s=45)
+
+    # 1.5) 美白（對應 FilterOnMe Skin.color 軸）：臉部凸包羽化遮罩內 screen 式提亮，保留紋理
+    if whiten > 0:
+        x, y, wf, hf = cv2.boundingRect(pts.astype(np.int32))
+        pad = int(0.20 * max(wf, hf))
+        X0, Y0 = max(0, x - pad), max(0, y - pad)
+        X1, Y1 = min(W, x + wf + pad), min(H, y + hf + pad)
+        if X1 > X0 and Y1 > Y0:
+            m = np.zeros((Y1 - Y0, X1 - X0), np.float32)
+            cv2.fillConvexPoly(m, cv2.convexHull((pts - [X0, Y0]).astype(np.int32)), 1.0)
+            m = cv2.GaussianBlur(m, (0, 0), 10.0) * min(1.0, whiten)
+            roi = out[Y0:Y1, X0:X1].astype(np.float32)
+            lifted = roi + (255.0 - roi) * 0.42
+            a = m[..., None]
+            out[Y0:Y1, X0:X1] = (roi * (1 - a) + lifted * a).astype(np.uint8)
 
     # 2) 魚尾紋 / 眼下細紋（眼尾外側橢圓，強柔化；挖掉眼睛本體避免糊到眼睛）
     #    wrinkle 越高→sigma 越大、>0.85 做兩道保邊柔化，讓深一點的魚尾紋也抹得掉。
@@ -332,6 +354,13 @@ def apply_beauty(rgb, lms, params):
             roi = out[Y0:Y1, X0:X1].astype(np.float32)
             out[Y0:Y1, X0:X1] = (roi * (1 - 0.30 * m[..., None])).astype(np.uint8)
 
+    # 6.5) 大眼（細緻版，對應 FilterOnMe FaceMorph.eyes 軸；搞笑大眼請用 warp）
+    if eye_big > 0:
+        for idx in (468, 473):   # 虹膜中心（478 點模型）
+            if idx < len(lms):
+                out = bulge(out, lms[idx].x * W, lms[idx].y * H,
+                            face_w * 0.16, min(0.5, eye_big) * 0.55)
+
     # 7) 瘦臉（幾何 warp，最後做，讓上面所有妝感一起跟著變形）
     if slim > 0:
         out = slim_face(out, pts, slim)
@@ -411,29 +440,278 @@ def _font(size):
 
 _panel_cache = {}
 
+# ---- 專業雙語面板：字型 / 分類色 / 漸層工具 ----
+_uifont_cache = {}
+def _uifont(kind, size):
+    k = (kind, size)
+    if k in _uifont_cache:
+        return _uifont_cache[k]
+    cand = {
+        "zhb":  [r"C:\Windows\Fonts\msjhbd.ttc", r"C:\Windows\Fonts\msyhbd.ttc"],
+        "zh":   [r"C:\Windows\Fonts\msjh.ttc",   r"C:\Windows\Fonts\msyh.ttc"],
+        "en":   [r"C:\Windows\Fonts\segoeui.ttf"],
+        "ensb": [r"C:\Windows\Fonts\segoeuisb.ttf", r"C:\Windows\Fonts\segoeuib.ttf"],
+    }.get(kind, [r"C:\Windows\Fonts\msjh.ttc"])
+    fnt = None
+    for p in cand:
+        if os.path.exists(p):
+            try:
+                fnt = PILFont.truetype(p, size); break
+            except Exception:
+                pass
+    if fnt is None:
+        fnt = _font(size)
+    _uifont_cache[k] = fnt
+    return fnt
+
+_CAT_COLOR = {
+    "basic": (150, 156, 168), "color": (122, 162, 247), "beauty": (233, 130, 155),
+    "bg": (110, 196, 158), "acc": (240, 168, 120), "head": (230, 176, 92), "warp": (176, 142, 232),
+}
+
+def _vgrad_rrect(base, box, c1, c2, radius):
+    """在 base(RGB PIL) 上貼一個上下漸層的圓角矩形。"""
+    x0, y0, x1, y1 = [int(v) for v in box]
+    w, h = max(1, x1 - x0), max(1, y1 - y0)
+    grad = PILImage.new("RGB", (w, h))
+    gd = PILDraw.Draw(grad)
+    for i in range(h):
+        t = i / max(1, h - 1)
+        gd.line([(0, i), (w, i)], fill=tuple(int(c1[j] + (c2[j] - c1[j]) * t) for j in range(3)))
+    mask = PILImage.new("L", (w, h), 0)
+    PILDraw.Draw(mask).rounded_rectangle([0, 0, w - 1, h - 1], radius=radius, fill=255)
+    base.paste(grad, (x0, y0), mask)
+
 def build_panel(presets, active, W):
-    """畫一排可點擊的中文大按鈕面板（只在 active 改變時重畫，快取）。回傳 (面板BGR, 命中矩形, 高)。"""
+    """專業雙語濾鏡面板（中文為主、英文在下；分類色條；active 用暖色漸層＋光暈）。
+       只在 active 改變時重畫並快取。回傳 (面板BGR, 命中矩形, 高)。"""
     if active in _panel_cache:
         return _panel_cache[active]
-    cols = 5
+    PADX, GAP = 16, 12
+    cols = int(max(4, min(7, (W - PADX * 2 + GAP) // (215 + GAP))))
+    cardw = (W - PADX * 2 - GAP * (cols - 1)) / cols
+    cardh, hdrh = 66, 60
     rows = (len(presets) + cols - 1) // cols
-    bw = W // cols
-    bh = 62
-    pil = PILImage.new("RGB", (W, rows * bh), (22, 22, 26))
-    d = PILDraw.Draw(pil)
-    f, fk = _font(20), _font(14)
+    H = hdrh + PADX + rows * (cardh + GAP) - GAP + PADX
+
+    BG = (17, 19, 24); CARD = (32, 36, 45); BORDER = (49, 54, 67)
+    TXT = (244, 245, 248); TXT_EN = (150, 158, 173); TXT_KEY = (120, 127, 142)
+    HDR = (23, 26, 34); ACC1 = (240, 178, 110); ACC2 = (226, 120, 110); GOLD = (233, 193, 122)
+
+    pil = PILImage.new("RGB", (W, H), BG)
+    d = PILDraw.Draw(pil, "RGBA")
+    zhb = lambda s: _uifont("zhb", s); zh = lambda s: _uifont("zh", s)
+    en = lambda s: _uifont("en", s); ensb = lambda s: _uifont("ensb", s)
+
+    # 標題列
+    d.rectangle([0, 0, W, hdrh], fill=HDR)
+    d.text((PADX, 13), "primelive", font=ensb(24), fill=GOLD)
+    plw = d.textlength("primelive", font=ensb(24))
+    d.text((PADX + plw + 10, 18), "一鍵濾鏡", font=zhb(16), fill=TXT)
+    d.text((PADX, 40), "點一下即換濾鏡　One-Tap Live Filters", font=zh(11), fill=TXT_EN)
+    cur = presets[active]
+    lbl = "目前 " + cur.get("name", "")
+    lw = max(d.textlength(lbl, font=zhb(13)), d.textlength(cur.get("en", ""), font=en(10))) + 24
+    _vgrad_rrect(pil, (W - PADX - lw, 12, W - PADX, hdrh - 12), ACC1, ACC2, 11)
+    cxx = W - PADX - lw / 2
+    d.text((cxx, 24), lbl, font=zhb(13), fill=(38, 26, 20), anchor="mm")
+    d.text((cxx, 40), cur.get("en", ""), font=en(10), fill=(84, 54, 42), anchor="mm")
+
     rects = []
+    y0 = hdrh + PADX
     for i, pr in enumerate(presets):
         r, c = divmod(i, cols)
-        x0, y0 = c * bw, r * bh
-        on = (i == active)
-        d.rectangle([x0 + 3, y0 + 3, x0 + bw - 3, y0 + bh - 3], fill=(60, 150, 95) if on else (48, 48, 56))
-        d.text((x0 + 12, y0 + 6), "[" + str(pr["key"]) + "]", font=fk, fill=(225, 240, 225) if on else (150, 150, 160))
-        d.text((x0 + 12, y0 + 26), pr["name"], font=f, fill=(255, 255, 255) if on else (205, 205, 210))
-        rects.append((x0, y0, x0 + bw, y0 + bh, i))
+        x = PADX + c * (cardw + GAP); y = y0 + r * (cardh + GAP)
+        on = (i == active); acc = _CAT_COLOR.get(pr.get("cat", "basic"), (150, 156, 168))
+        if on:
+            _vgrad_rrect(pil, (x, y, x + cardw, y + cardh), ACC1, ACC2, 11)
+            d.rounded_rectangle([x, y, x + cardw, y + cardh], radius=11, outline=(255, 225, 190, 140), width=1)
+            name_c = (38, 26, 20); en_c = (96, 60, 44); key_bg = (255, 255, 255, 150); key_out = None; key_c = (150, 100, 60)
+        else:
+            d.rounded_rectangle([x, y, x + cardw, y + cardh], radius=11, fill=CARD, outline=BORDER, width=1)
+            name_c = TXT; en_c = TXT_EN; key_bg = (44, 49, 61, 255); key_out = BORDER; key_c = TXT_KEY
+        d.rounded_rectangle([x + 9, y + 12, x + 12, y + cardh - 12], radius=2, fill=(255, 255, 255, 210) if on else acc)
+        tx = x + 22
+        d.text((tx, y + 13), pr.get("name", ""), font=zhb(17), fill=name_c)
+        d.text((tx, y + 40), pr.get("en", ""), font=en(10), fill=en_c)
+        kb = str(pr["key"]).upper(); kw = d.textlength(kb, font=ensb(11))
+        bx1 = x + cardw - 12; bx0 = bx1 - (kw + 14)
+        d.rounded_rectangle([bx0, y + 11, bx1, y + 29], radius=5, fill=key_bg, outline=key_out, width=1)
+        d.text(((bx0 + bx1) / 2, y + 20), kb, font=ensb(11), fill=key_c, anchor="mm")
+        rects.append((int(x), int(y), int(x + cardw), int(y + cardh), i))
+
     panel = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
-    _panel_cache[active] = (panel, rects, rows * bh)
+    _panel_cache[active] = (panel, rects, H)
     return _panel_cache[active]
+
+
+# ---------- v6 濾鏡選擇器（單排橫向可捲動;主畫面=OBS 預覽,引擎視窗只有這條）----------
+STRIP_VIEW_W = 1220
+STRIP_TW = 78
+STRIP_GAP, STRIP_PAD = 6, 12
+STRIP_HDR, STRIP_TAGH, STRIP_LBL, STRIP_SBH, STRIP_FOOT = 30, 16, 27, 7, 18
+_CATZH = {"basic": "美顏", "beauty": "美顏", "color": "調色", "bg": "換背景", "fun": "趣味"}
+_CATEN = {"basic": "Beauty", "beauty": "Beauty", "color": "Color", "bg": "Background", "fun": "Fun"}
+_C_BG = (23, 18, 16); _C_HDR = (32, 26, 22); _C_TXT = (246, 243, 240); _C_SUB = (162, 150, 139)
+_C_GOLD = (122, 193, 233); _C_ACC = (96, 164, 240); _C_DIM = (116, 103, 96)   # BGR
+
+class ThumbWorker:
+    """背景執行緒:拿一格快照,把全部濾鏡各跑一次引擎管線,生成同尺寸縮圖。
+    不佔主迴圈(虛擬攝影機輸出不中斷);R 鍵可用最新畫面重生。"""
+    def __init__(self, presets, assets):
+        self.presets = presets
+        self.assets = assets
+        self.thumbs = [None] * len(presets)
+        self.busy = False
+        self.version = 0
+        self._lm = None
+        self._seg = None
+
+    def start(self, frame_bgr, tw, th):
+        if self.busy or frame_bgr is None:
+            return
+        self.busy = True
+        threading.Thread(target=self._run, args=(frame_bgr.copy(), tw, th), daemon=True).start()
+
+    def _ensure_models(self):
+        import mediapipe as mp
+        from mediapipe.tasks import python as mp_python
+        from mediapipe.tasks.python import vision
+        if self._lm is None:
+            self._lm = vision.FaceLandmarker.create_from_options(vision.FaceLandmarkerOptions(
+                base_options=mp_python.BaseOptions(model_asset_path=MODEL),
+                running_mode=vision.RunningMode.IMAGE, num_faces=1))
+            if os.path.exists(MODEL_SEG):
+                self._seg = vision.ImageSegmenter.create_from_options(vision.ImageSegmenterOptions(
+                    base_options=mp_python.BaseOptions(model_asset_path=MODEL_SEG),
+                    running_mode=vision.RunningMode.IMAGE, output_confidence_masks=True))
+        return mp
+
+    def _run(self, frame, tw, th):
+        try:
+            mp = self._ensure_models()
+            h0, w0 = frame.shape[:2]
+            rgb = cv2.cvtColor(cv2.resize(frame, (300, max(2, int(300 * h0 / w0))),
+                                          interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB)
+            H, W = rgb.shape[:2]
+            res = self._lm.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(rgb)))
+            lms = res.face_landmarks[0] if res.face_landmarks else None
+            segm = None
+            if self._seg is not None:
+                small = np.ascontiguousarray(cv2.resize(rgb, (384, 216)))
+                s = self._seg.segment(mp.Image(image_format=mp.ImageFormat.SRGB, data=small))
+                if s.confidence_masks:
+                    m = np.asarray(s.confidence_masks[0].numpy_view(), dtype=np.float32)
+                    segm = cv2.GaussianBlur(cv2.resize(m, (W, H)), (0, 0), 3.0)[..., None]
+            for i, p in enumerate(self.presets):
+                out = rgb.copy()
+                if p.get("background") and segm is not None:
+                    bg = load_bg(os.path.join(self.assets, p["background"]), W, H)
+                    if bg is not None:
+                        out = (out.astype(np.float32) * segm + bg.astype(np.float32) * (1 - segm)).astype(np.uint8)
+                if p.get("beauty") and lms is not None:
+                    out = apply_beauty(out, lms, p["beauty"])
+                if p.get("warp") and lms is not None:
+                    w = p["warp"]
+                    out = apply_warp(out, lms, float(w.get("eye", 0)), float(w.get("mouth", 0)))
+                if p.get("lut"):
+                    out = apply_lut(out, load_cube(os.path.join(self.assets, p["lut"])))
+                if p.get("sticker") and lms is not None:
+                    if p.get("anchor") == "head":
+                        cx, cy, twd, ang = head_placement(lms, W, H, p.get("scale", 2.2), p.get("y_off", -0.15))
+                    else:
+                        cx, cy, twd, ang = crown_placement(lms, W, H)
+                    out = overlay(out, load_sticker(os.path.join(self.assets, p["sticker"])), cx, cy, twd, ang)
+                self.thumbs[i] = cv2.resize(cv2.cvtColor(out, cv2.COLOR_RGB2BGR), (tw, th),
+                                            interpolation=cv2.INTER_AREA)
+                self.version += 1
+        except Exception as e:
+            print("[note] 縮圖產生失敗: %s %s" % (type(e).__name__, e))
+        finally:
+            self.busy = False
+
+
+def build_strip_view(presets, thumbs, active, scroll, tw, th, status):
+    """畫單排選擇器視圖(可捲動視窗)。回傳 (BGR, 命中矩形, max_scroll, 視窗高)。"""
+    n = len(presets)
+    content_w = STRIP_PAD * 2 + n * tw + (n - 1) * STRIP_GAP
+    max_scroll = max(0, content_w - STRIP_VIEW_W)
+    scroll = int(max(0, min(scroll, max_scroll)))
+    H = STRIP_HDR + STRIP_TAGH + th + STRIP_LBL + 2 + STRIP_SBH + 4 + STRIP_FOOT
+
+    pil = PILImage.new("RGB", (STRIP_VIEW_W, H), (_C_BG[2], _C_BG[1], _C_BG[0]))
+    d = PILDraw.Draw(pil, "RGBA")
+    zhb = lambda s: _uifont("zhb", s); zh = lambda s: _uifont("zh", s)
+    en = lambda s: _uifont("en", s); ensb = lambda s: _uifont("ensb", s)
+    GOLD = (233, 193, 122); ACCENT = (240, 164, 96); TXT = (240, 242, 246)
+    SUB = (139, 147, 162); DIM = (96, 102, 116)
+
+    # 頂欄
+    d.rectangle([0, 0, STRIP_VIEW_W, STRIP_HDR], fill=(22, 25, 32))
+    d.text((STRIP_PAD, 5), "primelive", font=ensb(13), fill=GOLD)
+    plw = d.textlength("primelive", font=ensb(13))
+    d.text((STRIP_PAD + plw + 8, 7), "一鍵濾鏡", font=zhb(10), fill=TXT)
+    cur = presets[active]
+    d.text((STRIP_VIEW_W / 2, STRIP_HDR / 2), "目前 %s · %s" % (cur.get("name", ""), cur.get("en", "")),
+           font=zh(10), fill=(250, 214, 166), anchor="mm")
+    d.text((STRIP_VIEW_W - STRIP_PAD, STRIP_HDR / 2), status, font=en(9), fill=SUB, anchor="rm")
+
+    ty = STRIP_HDR + STRIP_TAGH
+    rects = []
+    prev_cat = None
+    for i, p in enumerate(presets):
+        x = STRIP_PAD + i * (tw + STRIP_GAP) - scroll
+        cat = _CATZH.get(p.get("cat", "basic"), "")
+        if cat != prev_cat:
+            if -120 < x < STRIP_VIEW_W:
+                d.text((max(2, x), STRIP_HDR + 1),
+                       "%s  %s" % (cat, _CATEN.get(p.get("cat", "basic"), "")),
+                       font=zhb(8.5), fill=GOLD if cat == "美顏" else SUB)
+            prev_cat = cat
+        if x + tw < 0 or x > STRIP_VIEW_W:
+            continue
+        on = (i == active)
+        tb = thumbs[i]
+        if tb is not None:
+            pil.paste(PILImage.fromarray(cv2.cvtColor(tb, cv2.COLOR_BGR2RGB)), (int(x), ty))
+        else:
+            d.rounded_rectangle([x, ty, x + tw, ty + th], radius=6, fill=(30, 33, 41))
+            d.text((x + tw / 2, ty + th / 2), "更新中", font=zh(8), fill=DIM, anchor="mm")
+        if on:
+            d.rounded_rectangle([x, ty, x + tw, ty + th], radius=6, outline=ACCENT, width=2)
+        if p.get("key"):
+            kb = p["key"].upper()
+            kw = d.textlength(kb, font=ensb(7)) + 7
+            d.rounded_rectangle([x + tw - kw - 2, ty + 2, x + tw - 2, ty + 13], radius=3, fill=(0, 0, 0, 150))
+            d.text((x + tw - kw / 2 - 2, ty + 7.5), kb, font=ensb(7), fill=(232, 234, 240), anchor="mm")
+        d.text((x + tw / 2, ty + th + 2), p.get("name", ""), font=zhb(9) if on else zh(9),
+               fill=(250, 214, 166) if on else TXT, anchor="ma")
+        enl = p.get("en", "")
+        if d.textlength(enl, font=en(6.5)) > tw:
+            enl = enl[:13] + "…"
+        d.text((x + tw / 2, ty + th + 15), enl, font=en(6.5), fill=SUB, anchor="ma")
+        rects.append((int(x), ty, int(x + tw), ty + th, i))
+
+    # 邊緣淡出+箭頭
+    if scroll > 0:
+        d.polygon([(10, ty + th / 2 - 8), (4, ty + th / 2), (10, ty + th / 2 + 8)], fill=(210, 214, 222))
+    if scroll < max_scroll:
+        d.polygon([(STRIP_VIEW_W - 10, ty + th / 2 - 8), (STRIP_VIEW_W - 4, ty + th / 2),
+                   (STRIP_VIEW_W - 10, ty + th / 2 + 8)], fill=(210, 214, 222))
+
+    # 捲動條
+    sy = ty + th + STRIP_LBL + 2
+    d.rounded_rectangle([STRIP_PAD, sy, STRIP_VIEW_W - STRIP_PAD, sy + STRIP_SBH - 2], radius=2, fill=(34, 38, 47))
+    frac = min(1.0, STRIP_VIEW_W / float(content_w))
+    bar_w = (STRIP_VIEW_W - STRIP_PAD * 2) * frac
+    bar_x = STRIP_PAD + (STRIP_VIEW_W - STRIP_PAD * 2 - bar_w) * (scroll / float(max_scroll) if max_scroll else 0)
+    d.rounded_rectangle([bar_x, sy, bar_x + bar_w, sy + STRIP_SBH - 2], radius=2, fill=(88, 95, 110))
+
+    fy = H - STRIP_FOOT - 1
+    d.text((STRIP_PAD, fy), "滾輪/拖曳捲動 · 點縮圖或快捷鍵切換 · ←→ 上/下一個 · R 更新縮圖 · N 換攝影機 · Q 離開",
+           font=zh(8.2), fill=SUB)
+    bgr = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+    return bgr, rects, max_scroll, H
 
 
 # ---------- 鏡頭選擇（用名稱挑 OBSBOT，永不誤開手機/連線相機）----------
@@ -735,16 +1013,34 @@ def main():
     print("[ok] 防lag：背景抓圖=%s，自動調解析度=%s（目標 %d fps，下限 %.0f%%）"
           % ("開" if threaded else "關", "開" if not args.no_adaptive else "關", args.target_fps, args.min_scale * 100))
 
-    ui = {"active": active, "H": OUT_H, "rects": []}
+    # v6 選擇器狀態:單排可捲動;主畫面請看 OBS 預覽
+    ui = {"active": active, "scroll": 0, "rects": [], "dirty": True, "drag": None, "moved": False}
+    strip_tw = STRIP_TW
+    strip_th = max(30, int(STRIP_TW * H / float(W)))     # 縮圖同攝影機比例
+    worker = ThumbWorker(presets, ASSETS)
+    WIN = "primelive 一鍵濾鏡"
     if not args.no_window:
         def _on_mouse(event, x, y, flags, param):
-            if event == cv2.EVENT_LBUTTONDOWN:
-                yy = y - ui["H"]
-                for (x0, y0, x1, y1, idx) in ui["rects"]:
-                    if x0 <= x < x1 and y0 <= yy < y1:
-                        ui["active"] = idx
-        cv2.namedWindow("primelive engine")
-        cv2.setMouseCallback("primelive engine", _on_mouse)
+            if event == cv2.EVENT_MOUSEWHEEL:
+                step = (strip_tw + STRIP_GAP) * 2
+                ui["scroll"] += -step if flags > 0 else step
+                ui["dirty"] = True
+            elif event == cv2.EVENT_LBUTTONDOWN:
+                ui["drag"] = (x, ui["scroll"]); ui["moved"] = False
+            elif event == cv2.EVENT_MOUSEMOVE and ui["drag"] is not None:
+                dx = x - ui["drag"][0]
+                if abs(dx) > 4:
+                    ui["moved"] = True
+                    ui["scroll"] = ui["drag"][1] - dx
+                    ui["dirty"] = True
+            elif event == cv2.EVENT_LBUTTONUP:
+                if ui["drag"] is not None and not ui["moved"]:
+                    for (x0, y0, x1, y1, idx) in ui["rects"]:
+                        if x0 <= x < x1 and y0 <= y < y1:
+                            ui["active"] = idx; ui["dirty"] = True
+                ui["drag"] = None
+        cv2.namedWindow(WIN, cv2.WINDOW_AUTOSIZE)
+        cv2.setMouseCallback(WIN, _on_mouse)
 
     n = 0
     t0 = time.time()
@@ -845,33 +1141,54 @@ def main():
                 cam.send(last_full)
             cam.sleep_until_next_frame()
 
-            if not args.no_window and last_full is not None:
-                disp = cv2.cvtColor(last_full, cv2.COLOR_RGB2BGR)
-                cv2.putText(disp, "fps~%.0f  scale %.1f  %dx%d" % (min(fps_ema, args.target_fps), adap.scale, OUT_W, OUT_H),
-                            (12, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (80, 255, 120), 2, cv2.LINE_AA)
-                panel, rects, _ = build_panel(presets, active, OUT_W)
-                ui["rects"] = rects
-                cv2.imshow("primelive engine", np.vstack([disp, panel]))
-                k = cv2.waitKey(1) & 0xFF
-                if k == ord("q"):
+            if not args.no_window:
+                # 開播後第一次有畫面 → 自動生成縮圖(背景執行緒,不卡輸出)
+                if is_new and n == 8 and worker.thumbs[0] is None and not worker.busy:
+                    worker.start(frame, strip_tw, strip_th)
+                # 縮圖進度或狀態改變才重繪(省 CPU)
+                ver = worker.version
+                if ui["dirty"] or ver != ui.get("_ver") or (n % 30 == 0):
+                    status = "OBS Virtual Camera ● %.0ffps · 畫質%.0f%%" % (min(fps_ema, args.target_fps), adap.scale * 100)
+                    view, rects, max_sc, _ = build_strip_view(presets, worker.thumbs, ui["active"],
+                                                              ui["scroll"], strip_tw, strip_th, status)
+                    ui["scroll"] = max(0, min(ui["scroll"], max_sc))
+                    ui["rects"] = rects
+                    ui["_ver"] = ver
+                    ui["dirty"] = False
+                    cv2.imshow(WIN, view)
+                k = cv2.waitKeyEx(1)
+                kc = k & 0xFF if k > 0 else -1
+                if kc in (ord("q"), ord("Q")):
                     break
-                elif k in (ord("="), ord("+")) and "scale" in presets[active]:
-                    presets[active]["scale"] = round(presets[active]["scale"] + 0.1, 2)
-                    print("  scale =", presets[active]["scale"])
-                elif k == ord("-") and "scale" in presets[active]:
-                    presets[active]["scale"] = round(presets[active]["scale"] - 0.1, 2)
-                    print("  scale =", presets[active]["scale"])
-                elif k == ord("]") and presets[active].get("anchor") == "head":
-                    presets[active]["y_off"] = round(presets[active].get("y_off", -0.15) + 0.02, 3)
-                    print("  y_off =", presets[active]["y_off"])
-                elif k == ord("[") and presets[active].get("anchor") == "head":
-                    presets[active]["y_off"] = round(presets[active].get("y_off", -0.15) - 0.02, 3)
-                    print("  y_off =", presets[active]["y_off"])
-                elif k == ord("o"):
+                elif k in (2424832, 2555904):     # ← →:上/下一個,並自動捲到可見
+                    step = -1 if k == 2424832 else 1
+                    ui["active"] = (ui["active"] + step) % len(presets)
+                    tx = STRIP_PAD + ui["active"] * (strip_tw + STRIP_GAP)
+                    if tx - ui["scroll"] < STRIP_PAD:
+                        ui["scroll"] = tx - STRIP_PAD
+                    elif tx - ui["scroll"] + strip_tw > STRIP_VIEW_W - STRIP_PAD:
+                        ui["scroll"] = tx + strip_tw - STRIP_VIEW_W + STRIP_PAD
+                    ui["dirty"] = True
+                elif kc in (ord("r"), ord("R")):  # 用最新畫面重生縮圖
+                    worker.start(frame, strip_tw, strip_th)
+                    ui["dirty"] = True
+                elif kc in (ord("="), ord("+")) and "scale" in presets[ui["active"]]:
+                    presets[ui["active"]]["scale"] = round(presets[ui["active"]]["scale"] + 0.1, 2)
+                    print("  scale =", presets[ui["active"]]["scale"])
+                elif kc == ord("-") and "scale" in presets[ui["active"]]:
+                    presets[ui["active"]]["scale"] = round(presets[ui["active"]]["scale"] - 0.1, 2)
+                    print("  scale =", presets[ui["active"]]["scale"])
+                elif kc == ord("]") and presets[ui["active"]].get("anchor") == "head":
+                    presets[ui["active"]]["y_off"] = round(presets[ui["active"]].get("y_off", -0.15) + 0.02, 3)
+                    print("  y_off =", presets[ui["active"]]["y_off"])
+                elif kc == ord("[") and presets[ui["active"]].get("anchor") == "head":
+                    presets[ui["active"]]["y_off"] = round(presets[ui["active"]].get("y_off", -0.15) - 0.02, 3)
+                    print("  y_off =", presets[ui["active"]]["y_off"])
+                elif kc == ord("o"):
                     with open(filters_path, "w", encoding="utf-8") as f:
                         json.dump({"presets": presets}, f, ensure_ascii=False, indent=2)
                     print("  已存回 filters.json")
-                elif k == ord("n"):   # 切換到下一個可用攝影機(永遠跳過手機/連線相機)
+                elif kc == ord("n"):   # 切換到下一個可用攝影機(永遠跳過手機/連線相機)
                     nxt, newcap = args.camera, None
                     for _ in range(6):
                         nxt = (nxt + 1) % 6
@@ -890,10 +1207,11 @@ def main():
                         print("  -> 切換攝影機 camera", nxt)
                     else:
                         print("  找不到其他攝影機")
-                else:
+                elif kc > 0:
                     for i, pr in enumerate(presets):
-                        if k == ord(pr["key"]):
+                        if pr.get("key") and kc == ord(pr["key"]):
                             ui["active"] = i
+                            ui["dirty"] = True
 
             if args.frames and n >= args.frames:
                 faces = 1 if (res and res.face_landmarks) else 0

@@ -1,40 +1,585 @@
 {
-  "_comment": "primelive 引擎濾鏡預設。anchor=head 的貼圖可在預覽窗用 = - 調大小、[ ] 調高低、o 存檔。beauty 子鍵：smooth 磨皮 / slim 瘦臉 / wrinkle 魚尾紋眼下細紋 / brighten_eyes 亮眼 / lipstick[r,g,b]+lip_strength 唇彩 / blush[r,g,b]+blush_strength 腮紅 / contour 修容。",
+  "_comment": "primelive 濾鏡預設 v2:美顏為主體。美顏軸/檔位參考 FilterOnMe(Banuba Makeup API):softening/Skin.color(美白)/FaceMorph.face(瘦臉)/FaceMorph.eyes(大眼)/Eyes(亮眼)/EyeBags(淡紋),強度=滑桿30/60/90%。趣味類 key 為空=僅點選。beauty 子鍵新增 whiten 美白/eye 大眼。",
   "presets": [
-    { "key": "1", "name": "原始",        "lut": null,                                     "sticker": null, "background": null, "beauty": null },
-    { "key": "2", "name": "奶茶暖陽",    "lut": "luts/primelive_amb_milktea_warm.cube",   "sticker": null, "background": null, "beauty": null },
-    { "key": "3", "name": "童話柔光",    "lut": "luts/primelive_amb_fairytale_soft.cube", "sticker": null, "background": null, "beauty": null },
-    { "key": "4", "name": "日系清新",    "lut": "luts/primelive_amb_jp_fresh.cube",       "sticker": null, "background": null, "beauty": null },
-    { "key": "5", "name": "花圈",        "lut": "luts/primelive_amb_milktea_warm.cube",   "sticker": "stickers/s04_flower_crown.png", "anchor": "head", "scale": 1.5, "y_off": -0.50 },
-    { "key": "6", "name": "天使光環",    "lut": "luts/primelive_amb_fairytale_soft.cube", "sticker": "stickers/s05_angel_halo.png",   "anchor": "head", "scale": 1.4, "y_off": -0.72 },
-    { "key": "7", "name": "換背景·書香咖啡廳", "background": "backgrounds_1080/01_book_cafe_00001_.png",        "lut": "luts/primelive_amb_milktea_warm.cube" },
-    { "key": "8", "name": "換背景·童話森林",   "background": "backgrounds_1080/12_fairytale_forest_00001_.png", "lut": "luts/primelive_amb_fairytale_soft.cube" },
-    { "key": "9", "name": "換背景·植栽溫室",   "background": "backgrounds_1080/06_greenhouse_00001_.png" },
-    { "key": "0", "name": "換背景·星空陽台",   "background": "backgrounds_1080/07_balcony_night_00001_.png",    "lut": "luts/primelive_amb_night_lamp.cube" },
-    { "key": "u", "name": "換背景·青瓷窗景",   "background": "ba.png",                                          "lut": "luts/primelive_amb_jp_fresh.cube" },
-
-    { "key": "a", "name": "自然美顏",        "beauty": { "smooth": 0.5, "slim": 0.08, "wrinkle": 0.6, "brighten_eyes": 0.2, "lipstick": [180, 105, 110], "lip_strength": 0.28, "blush": [236, 152, 158], "blush_strength": 0.12 }, "lut": "luts/primelive_amb_jp_fresh.cube" },
-    { "key": "s", "name": "美顏+奶茶",       "beauty": { "smooth": 0.55, "slim": 0.1, "wrinkle": 0.65, "brighten_eyes": 0.22, "lipstick": [170, 92, 98], "lip_strength": 0.35, "blush": [234, 144, 152], "blush_strength": 0.16 }, "lut": "luts/primelive_amb_milktea_warm.cube" },
-    { "key": "d", "name": "美顏·書香咖啡廳", "beauty": { "smooth": 0.55, "slim": 0.1, "wrinkle": 0.7, "brighten_eyes": 0.25 }, "background": "backgrounds_1080/01_book_cafe_00001_.png", "lut": "luts/primelive_amb_milktea_warm.cube" },
-
-    { "key": "i", "name": "精緻全妝",        "beauty": { "smooth": 0.55, "slim": 0.12, "wrinkle": 0.8, "brighten_eyes": 0.28, "lipstick": [160, 80, 92], "lip_strength": 0.5, "blush": [232, 138, 150], "blush_strength": 0.2, "contour": 0.18 }, "lut": "luts/primelive_amb_jp_fresh.cube" },
-    { "key": "j", "name": "魚尾紋淡化·裸妝", "beauty": { "smooth": 0.5, "slim": 0.06, "wrinkle": 0.95, "brighten_eyes": 0.35, "lipstick": [185, 110, 112], "lip_strength": 0.22, "blush": [236, 152, 158], "blush_strength": 0.1 }, "lut": "luts/primelive_amb_jp_fresh.cube" },
-    { "key": "k", "name": "豆沙霧唇妝",      "beauty": { "smooth": 0.55, "slim": 0.12, "wrinkle": 0.8, "brighten_eyes": 0.28, "lipstick": [150, 98, 100], "lip_strength": 0.55, "blush": [225, 150, 150], "blush_strength": 0.18, "contour": 0.15 }, "lut": "luts/primelive_amb_milktea_warm.cube" },
-    { "key": "l", "name": "蜜桃甜心妝",      "beauty": { "smooth": 0.55, "slim": 0.12, "wrinkle": 0.8, "brighten_eyes": 0.3, "lipstick": [205, 112, 100], "lip_strength": 0.5, "blush": [240, 158, 138], "blush_strength": 0.24 }, "lut": "luts/primelive_amb_milktea_warm.cube" },
-    { "key": "m", "name": "精緻濃妝",        "beauty": { "smooth": 0.65, "slim": 0.18, "wrinkle": 0.9, "brighten_eyes": 0.35, "lipstick": [150, 58, 78], "lip_strength": 0.62, "blush": [230, 118, 140], "blush_strength": 0.26, "contour": 0.28 }, "lut": "luts/primelive_amb_fairytale_soft.cube" },
-    { "key": "p", "name": "全妝·書香咖啡廳", "beauty": { "smooth": 0.55, "slim": 0.12, "wrinkle": 0.8, "brighten_eyes": 0.28, "lipstick": [160, 84, 94], "lip_strength": 0.48, "blush": [232, 140, 150], "blush_strength": 0.2, "contour": 0.16 }, "background": "backgrounds_1080/01_book_cafe_00001_.png", "lut": "luts/primelive_amb_milktea_warm.cube" },
-    { "key": "y", "name": "零魚尾紋·專屬妝",  "beauty": { "smooth": 0.58, "slim": 0.1, "wrinkle": 1.1, "brighten_eyes": 0.4, "lipstick": [158, 92, 96], "lip_strength": 0.45, "blush": [232, 142, 152], "blush_strength": 0.18, "contour": 0.16 }, "lut": "luts/primelive_amb_jp_fresh.cube" },
-
-    { "key": "z", "name": "水豚頭",          "sticker": "stickers/h_capybara.png", "anchor": "head", "scale": 1.8, "y_off": -0.12 },
-    { "key": "x", "name": "白熊分身·不露臉", "sticker": "stickers/h_avatar.png",   "anchor": "head", "scale": 1.8, "y_off": -0.12, "lipsync": { "y": 0.60, "w": 0.16 } },
-    { "key": "c", "name": "粉紅雙馬尾",      "sticker": "stickers/s06_heart_clips.png", "anchor": "head", "scale": 1.95, "y_off": -0.22 },
-    { "key": "v", "name": "大眼娃娃",        "warp": { "eye": 0.7, "mouth": 0.0 }, "lut": "luts/primelive_amb_fairytale_soft.cube" },
-    { "key": "b", "name": "香腸嘴",          "warp": { "eye": 0.0, "mouth": 0.6 } },
-    { "key": "e", "name": "哈哈鏡·大眼大嘴", "warp": { "eye": 0.6, "mouth": 0.5 } },
-    { "key": "r", "name": "水豚頭+書香",     "sticker": "stickers/h_capybara.png", "anchor": "head", "scale": 1.8, "y_off": -0.12, "background": "backgrounds_1080/01_book_cafe_00001_.png" },
-    { "key": "t", "name": "花圈+美顏",       "sticker": "stickers/s04_flower_crown.png", "anchor": "head", "scale": 1.5, "y_off": -0.50, "beauty": { "smooth": 0.5, "slim": 0.08, "wrinkle": 0.65, "brighten_eyes": 0.22 }, "lut": "luts/primelive_amb_milktea_warm.cube" },
-    { "key": "f", "name": "馬鈴薯頭",        "sticker": "stickers/h_sweet_potato.png", "anchor": "head", "scale": 1.7, "y_off": -0.12 },
-    { "key": "g", "name": "狐狸面具·不露臉", "sticker": "stickers/h_fox_mask.png",     "anchor": "head", "scale": 1.6, "y_off": -0.05 },
-    { "key": "h", "name": "飯糰頭",          "sticker": "stickers/h_riceball.png",     "anchor": "head", "scale": 1.8, "y_off": -0.12 }
+    {
+      "key": "1",
+      "name": "原始",
+      "en": "Original",
+      "cat": "basic"
+    },
+    {
+      "key": "s",
+      "name": "輕磨皮",
+      "en": "Soft Smooth",
+      "cat": "beauty",
+      "beauty": {
+        "smooth": 0.3
+      }
+    },
+    {
+      "key": "a",
+      "name": "自然美顏",
+      "en": "Natural Beauty",
+      "cat": "beauty",
+      "beauty": {
+        "smooth": 0.5,
+        "slim": 0.08,
+        "wrinkle": 0.6,
+        "brighten_eyes": 0.2,
+        "lipstick": [
+          180,
+          105,
+          110
+        ],
+        "lip_strength": 0.28,
+        "blush": [
+          236,
+          152,
+          158
+        ],
+        "blush_strength": 0.12
+      },
+      "lut": "luts/primelive_amb_jp_fresh.cube"
+    },
+    {
+      "key": "d",
+      "name": "深磨皮",
+      "en": "Deep Smooth",
+      "cat": "beauty",
+      "beauty": {
+        "smooth": 0.85,
+        "wrinkle": 0.4
+      }
+    },
+    {
+      "key": "f",
+      "name": "透亮白",
+      "en": "Fair Glow",
+      "cat": "beauty",
+      "beauty": {
+        "whiten": 0.3,
+        "smooth": 0.3
+      }
+    },
+    {
+      "key": "g",
+      "name": "牛奶白",
+      "en": "Milky White",
+      "cat": "beauty",
+      "beauty": {
+        "whiten": 0.6,
+        "smooth": 0.4
+      }
+    },
+    {
+      "key": "h",
+      "name": "冷瓷白",
+      "en": "Porcelain",
+      "cat": "beauty",
+      "beauty": {
+        "whiten": 0.9,
+        "smooth": 0.5
+      }
+    },
+    {
+      "key": "z",
+      "name": "微瘦臉",
+      "en": "Subtle Slim",
+      "cat": "beauty",
+      "beauty": {
+        "slim": 0.06,
+        "smooth": 0.35
+      }
+    },
+    {
+      "key": "x",
+      "name": "小V臉",
+      "en": "V-Face",
+      "cat": "beauty",
+      "beauty": {
+        "slim": 0.12,
+        "smooth": 0.45
+      }
+    },
+    {
+      "key": "c",
+      "name": "極致小臉",
+      "en": "Ultra Slim",
+      "cat": "beauty",
+      "beauty": {
+        "slim": 0.18,
+        "smooth": 0.5
+      }
+    },
+    {
+      "key": "w",
+      "name": "水靈大眼",
+      "en": "Doll Eyes",
+      "cat": "beauty",
+      "beauty": {
+        "eye": 0.3,
+        "brighten_eyes": 0.25,
+        "smooth": 0.35
+      }
+    },
+    {
+      "key": "u",
+      "name": "亮眼神采",
+      "en": "Bright Eyes",
+      "cat": "beauty",
+      "beauty": {
+        "brighten_eyes": 0.45,
+        "smooth": 0.3
+      }
+    },
+    {
+      "key": "y",
+      "name": "零魚尾紋",
+      "en": "Zero-Wrinkle",
+      "cat": "beauty",
+      "beauty": {
+        "smooth": 0.58,
+        "slim": 0.1,
+        "wrinkle": 1.1,
+        "brighten_eyes": 0.4,
+        "lipstick": [
+          158,
+          92,
+          96
+        ],
+        "lip_strength": 0.45,
+        "blush": [
+          232,
+          142,
+          152
+        ],
+        "blush_strength": 0.18,
+        "contour": 0.16
+      },
+      "lut": "luts/primelive_amb_jp_fresh.cube"
+    },
+    {
+      "key": "v",
+      "name": "減齡光采",
+      "en": "Ageless",
+      "cat": "beauty",
+      "beauty": {
+        "wrinkle": 1.0,
+        "smooth": 0.6,
+        "brighten_eyes": 0.4,
+        "whiten": 0.25
+      }
+    },
+    {
+      "key": "b",
+      "name": "元氣少女",
+      "en": "Youth Glow",
+      "cat": "beauty",
+      "beauty": {
+        "wrinkle": 0.8,
+        "smooth": 0.5,
+        "brighten_eyes": 0.3,
+        "whiten": 0.2,
+        "blush": [
+          240,
+          158,
+          150
+        ],
+        "blush_strength": 0.15
+      }
+    },
+    {
+      "key": "j",
+      "name": "裸妝淡紋",
+      "en": "Nude Look",
+      "cat": "beauty",
+      "beauty": {
+        "smooth": 0.5,
+        "slim": 0.06,
+        "wrinkle": 0.95,
+        "brighten_eyes": 0.35,
+        "lipstick": [
+          185,
+          110,
+          112
+        ],
+        "lip_strength": 0.22,
+        "blush": [
+          236,
+          152,
+          158
+        ],
+        "blush_strength": 0.1
+      },
+      "lut": "luts/primelive_amb_jp_fresh.cube"
+    },
+    {
+      "key": "k",
+      "name": "豆沙霧唇",
+      "en": "Mauve Matte",
+      "cat": "beauty",
+      "beauty": {
+        "smooth": 0.55,
+        "slim": 0.12,
+        "wrinkle": 0.8,
+        "brighten_eyes": 0.28,
+        "lipstick": [
+          150,
+          98,
+          100
+        ],
+        "lip_strength": 0.55,
+        "blush": [
+          225,
+          150,
+          150
+        ],
+        "blush_strength": 0.18,
+        "contour": 0.15
+      },
+      "lut": "luts/primelive_amb_milktea_warm.cube"
+    },
+    {
+      "key": "l",
+      "name": "蜜桃甜心",
+      "en": "Peach Sweet",
+      "cat": "beauty",
+      "beauty": {
+        "smooth": 0.55,
+        "slim": 0.12,
+        "wrinkle": 0.8,
+        "brighten_eyes": 0.3,
+        "lipstick": [
+          205,
+          112,
+          100
+        ],
+        "lip_strength": 0.5,
+        "blush": [
+          240,
+          158,
+          138
+        ],
+        "blush_strength": 0.24
+      },
+      "lut": "luts/primelive_amb_milktea_warm.cube"
+    },
+    {
+      "key": "i",
+      "name": "精緻全妝",
+      "en": "Full Glam",
+      "cat": "beauty",
+      "beauty": {
+        "smooth": 0.55,
+        "slim": 0.12,
+        "wrinkle": 0.8,
+        "brighten_eyes": 0.28,
+        "lipstick": [
+          160,
+          80,
+          92
+        ],
+        "lip_strength": 0.5,
+        "blush": [
+          232,
+          138,
+          150
+        ],
+        "blush_strength": 0.2,
+        "contour": 0.18
+      },
+      "lut": "luts/primelive_amb_jp_fresh.cube"
+    },
+    {
+      "key": "m",
+      "name": "精緻濃妝",
+      "en": "Bold Glam",
+      "cat": "beauty",
+      "beauty": {
+        "smooth": 0.65,
+        "slim": 0.18,
+        "wrinkle": 0.9,
+        "brighten_eyes": 0.35,
+        "lipstick": [
+          150,
+          58,
+          78
+        ],
+        "lip_strength": 0.62,
+        "blush": [
+          230,
+          118,
+          140
+        ],
+        "blush_strength": 0.26,
+        "contour": 0.28
+      },
+      "lut": "luts/primelive_amb_fairytale_soft.cube"
+    },
+    {
+      "key": "e",
+      "name": "女神光",
+      "en": "Goddess",
+      "cat": "beauty",
+      "beauty": {
+        "whiten": 0.5,
+        "slim": 0.12,
+        "smooth": 0.55,
+        "brighten_eyes": 0.3,
+        "blush": [
+          236,
+          150,
+          155
+        ],
+        "blush_strength": 0.12
+      }
+    },
+    {
+      "key": "p",
+      "name": "直播完美",
+      "en": "Live Perfect",
+      "cat": "beauty",
+      "beauty": {
+        "whiten": 0.4,
+        "slim": 0.1,
+        "smooth": 0.6,
+        "wrinkle": 0.8,
+        "brighten_eyes": 0.3,
+        "lipstick": [
+          185,
+          105,
+          108
+        ],
+        "lip_strength": 0.25
+      }
+    },
+    {
+      "key": "t",
+      "name": "心機素顏",
+      "en": "Barely-There",
+      "cat": "beauty",
+      "beauty": {
+        "whiten": 0.3,
+        "slim": 0.06,
+        "smooth": 0.45,
+        "lipstick": [
+          190,
+          115,
+          115
+        ],
+        "lip_strength": 0.18,
+        "blush": [
+          238,
+          155,
+          158
+        ],
+        "blush_strength": 0.1
+      }
+    },
+    {
+      "key": "2",
+      "name": "奶茶暖陽",
+      "en": "Milk Tea Glow",
+      "cat": "color",
+      "lut": "luts/primelive_amb_milktea_warm.cube"
+    },
+    {
+      "key": "3",
+      "name": "童話柔光",
+      "en": "Fairytale Soft",
+      "cat": "color",
+      "lut": "luts/primelive_amb_fairytale_soft.cube"
+    },
+    {
+      "key": "4",
+      "name": "日系清新",
+      "en": "JP Fresh",
+      "cat": "color",
+      "lut": "luts/primelive_amb_jp_fresh.cube"
+    },
+    {
+      "key": "5",
+      "name": "書香咖啡廳",
+      "en": "Book Café",
+      "cat": "bg",
+      "background": "backgrounds_1080/01_book_cafe_00001_.png",
+      "lut": "luts/primelive_amb_milktea_warm.cube"
+    },
+    {
+      "key": "6",
+      "name": "童話森林",
+      "en": "Fairy Forest",
+      "cat": "bg",
+      "background": "backgrounds_1080/12_fairytale_forest_00001_.png",
+      "lut": "luts/primelive_amb_fairytale_soft.cube"
+    },
+    {
+      "key": "7",
+      "name": "植栽溫室",
+      "en": "Greenhouse",
+      "cat": "bg",
+      "background": "backgrounds_1080/06_greenhouse_00001_.png"
+    },
+    {
+      "key": "8",
+      "name": "星空陽台",
+      "en": "Starry Balcony",
+      "cat": "bg",
+      "background": "backgrounds_1080/07_balcony_night_00001_.png",
+      "lut": "luts/primelive_amb_night_lamp.cube"
+    },
+    {
+      "key": "9",
+      "name": "青瓷窗景",
+      "en": "Celadon Window",
+      "cat": "bg",
+      "background": "ba.png",
+      "lut": "luts/primelive_amb_jp_fresh.cube"
+    },
+    {
+      "key": "",
+      "name": "花圈",
+      "en": "Flower Crown",
+      "cat": "fun",
+      "lut": "luts/primelive_amb_milktea_warm.cube",
+      "sticker": "stickers/s04_flower_crown.png",
+      "anchor": "head",
+      "scale": 1.5,
+      "y_off": -0.5
+    },
+    {
+      "key": "",
+      "name": "天使光環",
+      "en": "Angel Halo",
+      "cat": "fun",
+      "lut": "luts/primelive_amb_fairytale_soft.cube",
+      "sticker": "stickers/s05_angel_halo.png",
+      "anchor": "head",
+      "scale": 1.4,
+      "y_off": -0.72
+    },
+    {
+      "key": "",
+      "name": "粉紅雙馬尾",
+      "en": "Pink Twin Tails",
+      "cat": "fun",
+      "sticker": "stickers/s06_heart_clips.png",
+      "anchor": "head",
+      "scale": 1.95,
+      "y_off": -0.22
+    },
+    {
+      "key": "",
+      "name": "花圈美顏",
+      "en": "Crown+Beauty",
+      "cat": "fun",
+      "sticker": "stickers/s04_flower_crown.png",
+      "anchor": "head",
+      "scale": 1.5,
+      "y_off": -0.5,
+      "beauty": {
+        "smooth": 0.5,
+        "slim": 0.08,
+        "wrinkle": 0.65,
+        "brighten_eyes": 0.22
+      },
+      "lut": "luts/primelive_amb_milktea_warm.cube"
+    },
+    {
+      "key": "",
+      "name": "水豚頭",
+      "en": "Capybara",
+      "cat": "fun",
+      "sticker": "stickers/h_capybara.png",
+      "anchor": "head",
+      "scale": 1.8,
+      "y_off": -0.12
+    },
+    {
+      "key": "",
+      "name": "白熊分身",
+      "en": "Bear Avatar",
+      "cat": "fun",
+      "sticker": "stickers/h_avatar.png",
+      "anchor": "head",
+      "scale": 1.8,
+      "y_off": -0.12,
+      "lipsync": {
+        "y": 0.6,
+        "w": 0.16
+      }
+    },
+    {
+      "key": "",
+      "name": "馬鈴薯頭",
+      "en": "Potato Head",
+      "cat": "fun",
+      "sticker": "stickers/h_sweet_potato.png",
+      "anchor": "head",
+      "scale": 1.7,
+      "y_off": -0.12
+    },
+    {
+      "key": "",
+      "name": "狐狸面具",
+      "en": "Fox Mask",
+      "cat": "fun",
+      "sticker": "stickers/h_fox_mask.png",
+      "anchor": "head",
+      "scale": 1.6,
+      "y_off": -0.05
+    },
+    {
+      "key": "",
+      "name": "飯糰頭",
+      "en": "Rice Ball",
+      "cat": "fun",
+      "sticker": "stickers/h_riceball.png",
+      "anchor": "head",
+      "scale": 1.8,
+      "y_off": -0.12
+    },
+    {
+      "key": "",
+      "name": "水豚書香",
+      "en": "Capy+Café",
+      "cat": "fun",
+      "sticker": "stickers/h_capybara.png",
+      "anchor": "head",
+      "scale": 1.8,
+      "y_off": -0.12,
+      "background": "backgrounds_1080/01_book_cafe_00001_.png"
+    },
+    {
+      "key": "",
+      "name": "大眼娃娃",
+      "en": "Big Eyes",
+      "cat": "fun",
+      "warp": {
+        "eye": 0.7,
+        "mouth": 0.0
+      },
+      "lut": "luts/primelive_amb_fairytale_soft.cube"
+    },
+    {
+      "key": "",
+      "name": "香腸嘴",
+      "en": "Sausage Lips",
+      "cat": "fun",
+      "warp": {
+        "eye": 0.0,
+        "mouth": 0.6
+      }
+    },
+    {
+      "key": "",
+      "name": "哈哈鏡",
+      "en": "Funhouse",
+      "cat": "fun",
+      "warp": {
+        "eye": 0.6,
+        "mouth": 0.5
+      }
+    }
   ]
 }
