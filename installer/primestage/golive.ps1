@@ -80,9 +80,10 @@ if ($Setup -or -not (Test-Path $profDir)) {
               Where-Object { Test-Path $_ } | Select-Object -First 1
     if ($picker) { Note "第一次先選你的攝影機和麥克風..."; & $picker -EnginePath $engineExe }
     Note "設定 OBS(會問你的串流金鑰)..."
-    $setup = Join-Path $here "setup.ps1"
-    if (-not (Test-Path $setup)) { Die "找不到 setup.ps1(要和本檔放在一起)。" }
-    & $setup -Camera primelive
+    # 注意:不可命名 $setup(與 [switch]$Setup 參數同名,PS 不分大小寫會炸型別)
+    $obsSetupPs = Join-Path $here "setup.ps1"
+    if (-not (Test-Path $obsSetupPs)) { Die "找不到 setup.ps1(要和本檔放在一起)。" }
+    & $obsSetupPs -Camera primelive
 }
 
 # ---- ③ 啟動引擎 → 等虛擬攝影機 → 開 OBS -------------------------------------
