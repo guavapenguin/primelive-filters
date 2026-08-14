@@ -32,7 +32,7 @@ if sys.platform == "win32":
 # --noconsole(視窗模式)打包時 stdout/stderr 是 None,print 會炸 → 導到日誌檔
 if getattr(sys, "frozen", False) and (sys.stdout is None or sys.stderr is None):
     try:
-        _log = open(os.path.join(os.environ.get("TEMP", "."), "primelive_engine.log"),
+        _log = open(os.path.join(os.environ.get("TEMP") or __import__("tempfile").gettempdir(), "primelive_engine.log"),
                     "a", encoding="utf-8", buffering=1)
         if sys.stdout is None:
             sys.stdout = _log
@@ -460,11 +460,14 @@ def _uifont(kind, size):
     if k in _uifont_cache:
         return _uifont_cache[k]
     cand = {
-        "zhb":  [r"C:\Windows\Fonts\msjhbd.ttc", r"C:\Windows\Fonts\msyhbd.ttc"],
-        "zh":   [r"C:\Windows\Fonts\msjh.ttc",   r"C:\Windows\Fonts\msyh.ttc"],
-        "en":   [r"C:\Windows\Fonts\segoeui.ttf"],
-        "ensb": [r"C:\Windows\Fonts\segoeuisb.ttf", r"C:\Windows\Fonts\segoeuib.ttf"],
-    }.get(kind, [r"C:\Windows\Fonts\msjh.ttc"])
+        "zhb":  [r"C:\Windows\Fonts\msjhbd.ttc", r"C:\Windows\Fonts\msyhbd.ttc",
+                 "/System/Library/Fonts/PingFang.ttc", "/System/Library/Fonts/STHeiti Medium.ttc"],
+        "zh":   [r"C:\Windows\Fonts\msjh.ttc",   r"C:\Windows\Fonts\msyh.ttc",
+                 "/System/Library/Fonts/PingFang.ttc", "/System/Library/Fonts/STHeiti Light.ttc"],
+        "en":   [r"C:\Windows\Fonts\segoeui.ttf", "/System/Library/Fonts/Helvetica.ttc"],
+        "ensb": [r"C:\Windows\Fonts\segoeuisb.ttf", r"C:\Windows\Fonts\segoeuib.ttf",
+                 "/System/Library/Fonts/Helvetica.ttc"],
+    }.get(kind, [r"C:\Windows\Fonts\msjh.ttc", "/System/Library/Fonts/PingFang.ttc"])
     fnt = None
     for p in cand:
         if os.path.exists(p):
@@ -567,8 +570,9 @@ class ObsControl:
         self.connected = False
         self.busy = False
         try:   # 設定流程(setup.ps1)產生的連線資訊:埠+隨機密碼
-            cfg = json.load(open(os.path.join(os.environ.get("APPDATA", ""), "PrimeStage", "obsws.json"),
-                                 encoding="utf-8"))
+            base = (os.environ.get("APPDATA", "") if sys.platform == "win32"
+                    else os.path.expanduser("~/Library/Application Support"))
+            cfg = json.load(open(os.path.join(base, "PrimeStage", "obsws.json"), encoding="utf-8"))
             self.port = int(cfg.get("port", self.port))
             self.password = cfg.get("password", "")
         except Exception:
@@ -1054,13 +1058,29 @@ _PHONE_PAT = ("連線相機", "虛擬攝影機", "phone", "手機", "galaxy", "s
               "droidcam", "iriun", "camo", "epoccam", "ivcam", "link to windows")
 _PREFER_PAT = ("obsbot tiny",)   # 真實 OBSBOT 實體鏡頭(不是 OBSBOT Virtual)
 
+CAP_BACKEND = cv2.CAP_DSHOW if sys.platform == "win32" else (
+    cv2.CAP_AVFOUNDATION if sys.platform == "darwin" else cv2.CAP_ANY)
+
 def list_camera_names():
-    """DirectShow 鏡頭名稱清單(索引與 cv2 CAP_DSHOW 一致)；取不到回 None。只列名、不開鏡頭。"""
-    try:
-        from pygrabber.dshow_graph import FilterGraph
-        return list(FilterGraph().get_input_devices())
-    except Exception:
-        return None
+    """鏡頭名稱清單(Windows=DirectShow 與 cv2 索引一致;macOS=system_profiler 盡力對應)。
+    取不到回 None。只列名、不開鏡頭。"""
+    if sys.platform == "win32":
+        try:
+            from pygrabber.dshow_graph import FilterGraph
+            return list(FilterGraph().get_input_devices())
+        except Exception:
+            return None
+    if sys.platform == "darwin":
+        try:
+            import subprocess
+            out = subprocess.run(["system_profiler", "SPCameraDataType", "-json"],
+                                 capture_output=True, timeout=10)
+            data = json.loads(out.stdout.decode("utf-8", "ignore"))
+            names = [c.get("_name", "") for c in data.get("SPCameraDataType", [])]
+            return names or None
+        except Exception:
+            return None
+    return None
 
 def _is_phone(name):
     n = (name or "").lower()
@@ -1274,7 +1294,7 @@ def main():
         print("[note] 找不到 selfie_segmenter.task，換背景功能停用")
 
     def open_cam(idx):
-        c = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+        c = cv2.VideoCapture(idx, CAP_BACKEND)
         c.set(cv2.CAP_PROP_FRAME_WIDTH, args.cap_width)
         c.set(cv2.CAP_PROP_FRAME_HEIGHT, args.cap_height)
         ok, fr = c.read()
