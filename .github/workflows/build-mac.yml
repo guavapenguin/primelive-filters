@@ -62,8 +62,9 @@ jobs:
         run: |
           set +e
           BIN="engine/dist/primelive_filter.app/Contents/MacOS/primelive_filter"
+          echo "== deps =="; engine/.venv-mac/bin/pip show mediapipe opencv-python numpy 2>/dev/null | grep -E "^(Name|Version)"
           out2=$("$BIN" --frames 1 --no-window 2>&1); c2=$?
-          echo "== frames1 (exit $c2) =="; echo "$out2" | tail -5
+          echo "== frames1 (exit $c2) =="; echo "$out2" | grep -vE "^(W0000|I0000)" | tail -60
           echo "$out2" | grep -q "找不到可用的攝影機" && echo "BUNDLE-OK" && exit 0
           echo "BUNDLE-FAIL"; exit 1
 
