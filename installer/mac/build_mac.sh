@@ -27,6 +27,19 @@ echo "[3/4] 複製模型/設定/素材進 .app..."
 cp "$ENG/face_landmarker.task" "$ENG/selfie_segmenter.task" "$ENG/filters.json" "$RES/"
 cp -R "$ASSETS" "$RES/assets"
 
+# ---- 簽章(有 Developer ID 憑證時;CI 由 SIGN_IDENTITY 傳入) ----
+if [ -n "${SIGN_IDENTITY:-}" ]; then
+  echo "[sign] codesign --deep --options runtime ($SIGN_IDENTITY)"
+  # PyInstaller 產物內含大量 .so/.dylib,先逐一簽再簽整包(公證要求全部簽章)
+  find "$APP" -type f \( -name "*.so" -o -name "*.dylib" \) -print0 | \
+    xargs -0 -n1 codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" 2>/dev/null || true
+  codesign --force --deep --timestamp --options runtime \
+    --entitlements "$HERE/entitlements.plist" --sign "$SIGN_IDENTITY" "$APP"
+  codesign --verify --deep --strict --verbose=2 "$APP" && echo "[sign] verify OK"
+else
+  echo "[sign] 未提供 SIGN_IDENTITY,產出未簽章版(Gatekeeper 會擋;正式發佈請設 CI Secrets)"
+fi
+
 echo "[4/4] 做發佈 dmg(app+開播腳本+內附OBS安裝檔+說明)..."
 STAGE="$ENG/dist/dmg_stage"
 rm -rf "$STAGE"; mkdir -p "$STAGE"
@@ -45,6 +58,9 @@ primelive 一鍵開播 (macOS)
 5) 視窗出現後:選濾鏡 → 按「● 開始直播」→ 回平台按「確認開播」
 EOF
 hdiutil create -volname "primelive" -srcfolder "$STAGE" -ov -format UDZO "$ENG/dist/primelive_mac.dmg"
+if [ -n "${SIGN_IDENTITY:-}" ]; then
+  codesign --force --timestamp --sign "$SIGN_IDENTITY" "$ENG/dist/primelive_mac.dmg" && echo "[sign] dmg signed"
+fi
 echo "完成 -> $ENG/dist/primelive_mac.dmg"
 echo ""
 echo "== 首次在 Mac 上必驗清單 =="

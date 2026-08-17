@@ -1,12 +1,20 @@
 name: build-mac
 # 在 GitHub 的 macOS 雲端主機打包 primelive_filter.app + dmg(本地沒有 Mac 也能出貨)
+# 簽章+公證(讓 Gatekeeper 零警告):設定下列 Secrets 後自動啟用,沒設就出未簽版
+#   MAC_CERT_P12_BASE64  Developer ID Application 憑證(.p12 轉 base64)
+#   MAC_CERT_PASSWORD    .p12 密碼
+#   APPLE_ID             Apple ID 帳號(公證用)
+#   APPLE_APP_PASSWORD   App 專用密碼(appleid.apple.com 產生)
+#   APPLE_TEAM_ID        Team ID(developer.apple.com 帳號頁)
 on:
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: macos-14   # Apple Silicon
-    timeout-minutes: 40
+    timeout-minutes: 60
+    env:
+      SIGN: ${{ secrets.MAC_CERT_P12_BASE64 != '' && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -14,20 +22,48 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Import Developer ID certificate (if provided)
+        if: env.SIGN == 'true'
+        env:
+          P12_B64: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          P12_PWD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          echo "$P12_B64" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p ci-tmp build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci-tmp build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$P12_PWD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci-tmp build.keychain
+          IDENT=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application" | head -1 | sed -E 's/.*"(.*)".*/\1/')
+          echo "SIGN_IDENTITY=$IDENT" >> $GITHUB_ENV
+          echo "identity: $IDENT"
+
       - name: Build .app + dmg
+        env:
+          SIGN_IDENTITY: ${{ env.SIGN_IDENTITY }}
         run: |
           export PYTHON=python3
           bash installer/mac/build_mac.sh
+
+      - name: Notarize + staple (if signed)
+        if: env.SIGN == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcrun notarytool submit engine/dist/primelive_mac.dmg \
+            --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+          xcrun stapler staple engine/dist/primelive_mac.dmg
+          spctl -a -t open --context context:primary-signature -v engine/dist/primelive_mac.dmg || true
+          echo "NOTARIZED"
 
       - name: Smoke test bundle (import chain + graceful no-camera exit)
         run: |
           set +e
           BIN="engine/dist/primelive_filter.app/Contents/MacOS/primelive_filter"
-          out1=$("$BIN" --list-cameras 2>&1); c1=$?
-          echo "== list-cameras (exit $c1) =="; echo "$out1"
           out2=$("$BIN" --frames 1 --no-window 2>&1); c2=$?
           echo "== frames1 (exit $c2) =="; echo "$out2" | tail -5
-          # 無攝影機環境:預期優雅退出(找不到攝影機),證明 numpy/cv2/mediapipe/PIL 全鏈可載入
           echo "$out2" | grep -q "找不到可用的攝影機" && echo "BUNDLE-OK" && exit 0
           echo "BUNDLE-FAIL"; exit 1
 
