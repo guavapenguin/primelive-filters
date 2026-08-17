@@ -6,6 +6,9 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
+# 內部試用版(未簽章):第一步替本資料夾解除「來自網路的隔離」,讓引擎 .app 能開(正式版簽章後不需要)
+xattr -dr com.apple.quarantine "$HERE" >/dev/null 2>&1 || true
+
 die() {
   osascript -e "display dialog \"$1\" buttons {\"OK\"} with icon stop with title \"primelive 開播\"" >/dev/null 2>&1 || true
   echo "[錯誤] $1"; exit 1

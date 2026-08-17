@@ -45,17 +45,36 @@ STAGE="$ENG/dist/dmg_stage"
 rm -rf "$STAGE"; mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"
 cp "$HERE/golive_mac.command" "$HERE/setup_mac.sh" "$STAGE/"
-chmod +x "$STAGE/golive_mac.command" "$STAGE/setup_mac.sh"
+# 檔名改白話,同事看到就知道點哪個
+mv "$STAGE/golive_mac.command" "$STAGE/開始直播（點我）.command"
+chmod +x "$STAGE/開始直播（點我）.command" "$STAGE/setup_mac.sh"
 # 內附 OBS 官方安裝檔(Apple Silicon;Intel 機器會自動改抓官方 Intel 版)
 curl -sL --retry 3 -o "$STAGE/OBS-Studio.dmg" \
   "https://github.com/obsproject/obs-studio/releases/download/32.1.2/OBS-Studio-32.1.2-macOS-Apple.dmg"
-cat > "$STAGE/使用說明.txt" <<'EOF'
-primelive 一鍵開播 (macOS)
-1) 把整個資料夾拖到桌面
-2) 按住 control 點 golive_mac.command → 打開(只有第一次要這樣)
-3) 它會自動裝好 OBS → 跳出視窗貼上你的「串流金鑰」
-4) 系統跳出任何詢問都按「允許」
-5) 視窗出現後:選濾鏡 → 按「● 開始直播」→ 回平台按「確認開播」
+cat > "$STAGE/先看我（4步驟）.txt" <<'EOF'
+primelive 直播  ─  4 步驟
+
+① 把這整個資料夾拖到「桌面」
+
+② 打開資料夾，找到「開始直播（點我）」
+   → 第一次：按住鍵盤 control 鍵、同時點它一下 → 選單選「打開」→ 再按一次「打開」
+   → 之後就直接點兩下就好
+
+③ 等它跑（第一次會自動安裝需要的東西，1～3 分鐘）
+   → 跳出視窗時，貼上你的「串流金鑰」（在直播主後台 → 設定 → OBS平台金鑰 → 複製）
+   → 電腦如果問你「要允許嗎」，一律按「允許」或「好」
+
+④ 出現直播視窗：
+   下面一排照片＝濾鏡，左右滑動、點一下就套用
+   按紅色「● 開始直播」→ 回到平台網頁按「確認開播」→ 上線！
+
+結束直播：平台按「停止直播」→ 直播視窗再按一次紅色按鈕 → 關掉視窗
+
+
+── 如果卡住 ──
+・「無法打開，因為無法驗證開發者」→ 按「取消」，回到②，記得要按住 control 再點
+・畫面全黑：關掉重點一次「開始直播（點我）」
+・其他狀況：整個畫面截圖傳給小編
 EOF
 hdiutil create -volname "primelive" -srcfolder "$STAGE" -ov -format UDZO "$ENG/dist/primelive_mac.dmg"
 if [ -n "${SIGN_IDENTITY:-}" ]; then
