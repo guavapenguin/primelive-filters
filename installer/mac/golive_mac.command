@@ -6,6 +6,19 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
+# 若在唯讀映像檔(dmg)裡被直接點開:自動複製整包到桌面,改從桌面那份執行(映像檔內 Gatekeeper 更嚴、且無法寫入)
+case "$HERE" in
+  /Volumes/*)
+    DEST="$HOME/Desktop/primelive"
+    osascript -e 'display dialog "第一次使用:正在把 primelive 複製到桌面(約 10 秒),之後請從桌面的「primelive」資料夾點「開始直播（點我）」。" buttons {"好"} default button 1 giving up after 6' >/dev/null 2>&1 || true
+    rm -rf "$DEST"; mkdir -p "$DEST"
+    cp -R "$HERE"/. "$DEST"/
+    xattr -dr com.apple.quarantine "$DEST" >/dev/null 2>&1 || true
+    open "$DEST"
+    exec bash "$DEST/$(basename "$0")" "$@"
+    ;;
+esac
+
 # 內部試用版(未簽章):第一步替本資料夾解除「來自網路的隔離」,讓引擎 .app 能開(正式版簽章後不需要)
 xattr -dr com.apple.quarantine "$HERE" >/dev/null 2>&1 || true
 
