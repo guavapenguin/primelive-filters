@@ -61,7 +61,14 @@ cp -R "$APP" "$STAGE/"
 cp "$HERE/golive_mac.command" "$HERE/setup_mac.sh" "$STAGE/"
 # 檔名改白話,同事看到就知道點哪個
 mv "$STAGE/golive_mac.command" "$STAGE/開始直播（點我）.command"
-chmod +x "$STAGE/開始直播（點我）.command" "$STAGE/setup_mac.sh"
+cat > "$STAGE/設定金鑰（換金鑰時點我）.command" <<'EOF2'
+#!/bin/bash
+HERE="$(cd "$(dirname "$0")" && pwd)"
+xattr -dr com.apple.quarantine "$HERE" >/dev/null 2>&1 || true
+bash "$HERE/setup_mac.sh"
+osascript -e 'display dialog "金鑰已更新。之後點「開始直播（點我）」即可。" buttons {"好"} default button 1 with title "primelive"' >/dev/null 2>&1 || true
+EOF2
+chmod +x "$STAGE/開始直播（點我）.command" "$STAGE/設定金鑰（換金鑰時點我）.command" "$STAGE/setup_mac.sh"
 # 內附 OBS 官方安裝檔(Apple Silicon;Intel 機器會自動改抓官方 Intel 版)
 curl -sL --retry 3 -o "$STAGE/OBS-Studio.dmg" \
   "https://github.com/obsproject/obs-studio/releases/download/32.1.2/OBS-Studio-32.1.2-macOS-Apple.dmg"
@@ -91,6 +98,8 @@ primelive 直播  ─  4 步驟
    按紅色「● 開始直播」→ 回到平台網頁按「確認開播」→ 上線！
 
 結束直播：平台按「停止直播」→ 直播視窗再按一次紅色按鈕 → 關掉視窗
+
+換金鑰 / 沒被問到金鑰：點兩下「設定金鑰（換金鑰時點我）」重新貼一次
 
 
 ── 如果卡住 ──

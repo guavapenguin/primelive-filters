@@ -62,7 +62,14 @@ ENGINE_BIN="$ENGINE/Contents/MacOS/primelive_filter"
 # ---- 首次:設定 OBS(唯一要主播動手的=貼金鑰) ----
 OBS_ROOT="$HOME/Library/Application Support/obs-studio"
 PS_DIR="$HOME/Library/Application Support/PrimeStage"
-if [ ! -d "$OBS_ROOT/basic/profiles/Prime Stage 直式" ] || [ "${1:-}" = "--setup" ]; then
+# 首次設定的判斷=「金鑰是否已填」(不是資料夾存不存在:先前失敗的嘗試可能已建好空設定)
+SVC="$OBS_ROOT/basic/profiles/Prime Stage 直式/service.json"
+KEY_SET=""
+if [ -f "$SVC" ]; then
+  KEY_SET=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['settings'].get('key',''))" "$SVC" 2>/dev/null || \
+            /usr/bin/plutil -extract settings.key raw -o - "$SVC" 2>/dev/null || echo "")
+fi
+if [ -z "$KEY_SET" ] || [ "${1:-}" = "--setup" ]; then
   bash "$HERE/setup_mac.sh" || die "OBS 設定失敗。"
 fi
 
