@@ -1064,8 +1064,29 @@ def build_main_view(presets, thumbs, active, scroll, tw, th, live, demo_label):
 
 # ---------- v8 手機式直式視窗:影像全幅+半透明浮層(自動隱藏濾鏡盤) ----------
 WIN_H = 940
-WIN_W = int(WIN_H * CANVAS_AR) // 2 * 2    # ≈432,整窗就是直式畫面
-TRAY_TW = 64                                # 濾鏡盤縮圖寬
+WIN_W = int(WIN_H * CANVAS_AR) // 2 * 2    # ≈432,整窗就是直式畫面(設計基準尺寸)
+TRAY_TW = 76                                # 濾鏡盤縮圖寬
+
+def _screen_h():
+    """主螢幕實體高度(px);高 DPI 螢幕上 OpenCV 視窗不吃系統縮放,要自己放大。"""
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            try: ctypes.windll.shcore.SetProcessDpiAwareness(2)
+            except Exception: pass
+            return int(ctypes.windll.user32.GetSystemMetrics(1))
+        if sys.platform == "darwin":
+            import subprocess, re
+            out = subprocess.run(["system_profiler", "SPDisplaysDataType"], capture_output=True, text=True, timeout=8).stdout
+            m = re.search(r"Resolution:\s*(\d+)\s*x\s*(\d+)", out)
+            if m: return int(m.group(2))
+    except Exception:
+        pass
+    return 1080
+
+# 顯示倍率:讓視窗高≈螢幕高 85%;1080p≈1.0,4K≈2.0。UI 一律以基準尺寸繪製再整張放大,滑鼠座標除回來。
+UI_SCALE = max(1.0, round((_screen_h() * 0.85) / float(WIN_H), 2))
+DISP_W, DISP_H = int(WIN_W * UI_SCALE) // 2 * 2, int(WIN_H * UI_SCALE) // 2 * 2
 
 def _alpha_paste(dst_bgr, ov_rgba, x, y):
     """把 RGBA 浮層(含半透明)貼到 BGR 畫面上。"""
@@ -1084,27 +1105,27 @@ def _rgba(pil_img):
 
 def build_topbar(cur, demo_label, live):
     """頂部半透明資訊列:品牌+目前濾鏡+示範chip+直播狀態。"""
-    H = 58
-    im = PILImage.new("RGBA", (WIN_W, H), (10, 10, 14, 175))
+    H = 74
+    im = PILImage.new("RGBA", (WIN_W, H), (10, 10, 14, 185))
     d = PILDraw.Draw(im)
     zhb = lambda s: _uifont("zhb", s); zh = lambda s: _uifont("zh", s); ensb = lambda s: _uifont("ensb", s)
-    d.text((10, 5), "primelive", font=ensb(13), fill=(233, 193, 122, 255))
-    d.text((10, 26), "目前濾鏡：" + cur.get("name", ""), font=zhb(14), fill=(255, 255, 255, 255))
+    d.text((12, 6), "primelive", font=ensb(16), fill=(233, 193, 122, 255))
+    d.text((12, 32), "目前濾鏡：" + cur.get("name", ""), font=zhb(19), fill=(255, 255, 255, 255))
     # 右上角 ✕ 關閉(mac 的系統關閉鈕不會通知 OpenCV 視窗,自畫一顆)
-    d.rounded_rectangle([WIN_W - 30, 4, WIN_W - 6, 24], radius=6, fill=(255, 255, 255, 40))
-    d.line([WIN_W - 23, 9, WIN_W - 13, 19], fill=(240, 242, 246, 255), width=2)
-    d.line([WIN_W - 13, 9, WIN_W - 23, 19], fill=(240, 242, 246, 255), width=2)
+    d.rounded_rectangle([WIN_W - 38, 6, WIN_W - 8, 32], radius=8, fill=(255, 255, 255, 50))
+    d.line([WIN_W - 30, 12, WIN_W - 16, 26], fill=(240, 242, 246, 255), width=3)
+    d.line([WIN_W - 16, 12, WIN_W - 30, 26], fill=(240, 242, 246, 255), width=3)
     if live.get("streaming"):
-        d.ellipse([WIN_W - 50, 9, WIN_W - 42, 17], fill=(235, 70, 60, 255))
-        d.text((WIN_W - 56, 7), "LIVE", font=ensb(9), fill=(255, 120, 110, 255), anchor="ra")
+        d.ellipse([WIN_W - 60, 12, WIN_W - 50, 22], fill=(235, 70, 60, 255))
+        d.text((WIN_W - 66, 8), "LIVE", font=ensb(12), fill=(255, 120, 110, 255), anchor="ra")
     if demo_label:
-        d.rounded_rectangle([WIN_W - 118, 28, WIN_W - 8, 52], radius=12, fill=(255, 255, 255, 50))
-        d.text((WIN_W - 63, 40), demo_label, font=zhb(11), fill=(255, 245, 230, 255), anchor="mm")
+        d.rounded_rectangle([WIN_W - 150, 34, WIN_W - 10, 66], radius=16, fill=(255, 255, 255, 60))
+        d.text((WIN_W - 80, 50), demo_label, font=zhb(14), fill=(255, 245, 230, 255), anchor="mm")
     return _rgba(im)
 
 def build_tray(presets, thumbs, active, scroll, tw, th):
     """底部半透明濾鏡盤(可捲動);回傳 (RGBA, 局部命中矩形, max_scroll, 高)。"""
-    PAD = 10; GAP = 6; LBL = 28
+    PAD = 10; GAP = 8; LBL = 34
     H = 12 + th + LBL
     n = len(presets)
     content_w = PAD * 2 + n * tw + (n - 1) * GAP
@@ -1134,36 +1155,36 @@ def build_tray(presets, thumbs, active, scroll, tw, th):
             d.rounded_rectangle([x - 1, ty - 1, x + tw + 1, ty + th + 1], radius=9,
                                 outline=(240, 164, 96, 255), width=2)
         nm = p.get("name", "")
-        d.text((x + tw / 2, ty + th + 3), nm, font=zhb(11) if on else zh(11),
+        d.text((x + tw / 2, ty + th + 4), nm, font=zhb(14) if on else zh(14),
                fill=(255, 220, 170, 255) if on else (245, 246, 250, 240), anchor="ma")
         rects.append((int(x), ty, int(x + tw), ty + th, i))
     return _rgba(im), rects, max_scroll, H
 
 def build_livebtn(live):
     """浮動「開始直播」膠囊鈕(半透明)。"""
-    W, H = 232, 58
+    W, H = 300, 72
     im = PILImage.new("RGBA", (W, H), (0, 0, 0, 0))
     d = PILDraw.Draw(im)
     zhb = lambda s: _uifont("zhb", s)
     if live.get("busy"):
-        d.rounded_rectangle([0, 0, W, H], radius=29, fill=(58, 62, 74, 235), outline=(150, 156, 168, 200), width=2)
+        d.rounded_rectangle([0, 0, W, H], radius=36, fill=(58, 62, 74, 240), outline=(200, 205, 215, 230), width=2)
         d.text((W / 2, H / 2), "準備 OBS 中…" if not live.get("connected") else "處理中…",
-               font=zhb(18), fill=(255, 255, 255, 255), anchor="mm")
+               font=zhb(22), fill=(255, 255, 255, 255), anchor="mm")
     elif live.get("streaming"):
-        d.rounded_rectangle([0, 0, W, H], radius=29, fill=(40, 42, 52, 230), outline=(200, 205, 215, 220), width=2)
-        d.text((W / 2, H / 2), "■ 停止直播", font=zhb(19), fill=(255, 190, 180, 255), anchor="mm")
+        d.rounded_rectangle([0, 0, W, H], radius=36, fill=(40, 42, 52, 235), outline=(220, 225, 235, 230), width=2)
+        d.text((W / 2, H / 2), "■ 停止直播", font=zhb(23), fill=(255, 200, 190, 255), anchor="mm")
     else:
-        d.rounded_rectangle([0, 0, W, H], radius=29, fill=(216, 56, 48, 240))
-        d.text((W / 2, H / 2), "● 開始直播", font=zhb(19), fill=(255, 255, 255, 255), anchor="mm")
+        d.rounded_rectangle([0, 0, W, H], radius=36, fill=(216, 56, 48, 245))
+        d.text((W / 2, H / 2), "● 開始直播", font=zhb(23), fill=(255, 255, 255, 255), anchor="mm")
     return _rgba(im)
 
 def build_handle():
     """濾鏡盤收起後的喚醒把手。"""
-    W, H = 110, 26
+    W, H = 130, 32
     im = PILImage.new("RGBA", (W, H), (0, 0, 0, 0))
     d = PILDraw.Draw(im)
-    d.rounded_rectangle([0, 0, W, H], radius=13, fill=(12, 12, 18, 170))
-    d.text((W / 2, H / 2), "︿ 濾鏡", font=_uifont("zhb", 11), fill=(245, 247, 250, 240), anchor="mm")
+    d.rounded_rectangle([0, 0, W, H], radius=16, fill=(12, 12, 18, 180))
+    d.text((W / 2, H / 2), "︿ 濾鏡", font=_uifont("zhb", 14), fill=(245, 247, 250, 245), anchor="mm")
     return _rgba(im)
 
 
@@ -1630,8 +1651,8 @@ def main():
           "moved": False, "demo": "f", "toggle": False, "live_toggle": False,
           "last_act": time.time(), "tray_vis": 1.0,
           "btn_rect": (0, 0, 0, 0), "handle_rect": (0, 0, 0, 0),
-          "chip_rect": (WIN_W - 118, 28, WIN_W - 8, 52),
-          "close_rect": (WIN_W - 30, 4, WIN_W - 6, 24), "quit": False}
+          "chip_rect": (WIN_W - 150, 34, WIN_W - 10, 66),
+          "close_rect": (WIN_W - 38, 6, WIN_W - 8, 32), "quit": False}
     strip_tw = TRAY_TW
     demo_imgs = {}
     for g, fn in (("f", "demo_female.png"), ("m", "demo_male.png")):
@@ -1650,6 +1671,7 @@ def main():
     WIN = "primelive"    # OpenCV 視窗標題不支援中文(會亂碼),用純英文
     if not args.no_window:
         def _on_mouse(event, x, y, flags, param):
+            x = int(x / UI_SCALE); y = int(y / UI_SCALE)   # 顯示座標→基準座標
             ui["last_act"] = time.time()          # 任何滑鼠動作=喚醒濾鏡盤
             if event == cv2.EVENT_MOUSEWHEEL:
                 step = (strip_tw + 6) * 2
@@ -1681,6 +1703,7 @@ def main():
                 ui["drag"] = None
         cv2.namedWindow(WIN, cv2.WINDOW_AUTOSIZE)
         cv2.setMouseCallback(WIN, _on_mouse)
+        print("[ui] 螢幕高 %d → 顯示倍率 %.2f,視窗 %dx%d" % (_screen_h(), UI_SCALE, DISP_W, DISP_H))
         # 開場就用示範圖生成縮圖(不等攝影機)
         if demo_imgs:
             worker.start(demo_imgs[ui["demo"]], strip_tw, strip_th, thumbs_map[ui["demo"]])
@@ -1875,13 +1898,15 @@ def main():
                     # 提示 toast(按鈕上方,半透明)
                     tz = ui.get("toast")
                     if tz and time.time() < tz[1]:
-                        _tim = PILImage.new("RGBA", (WIN_W - 24, 40), (0, 0, 0, 0))
+                        _tim = PILImage.new("RGBA", (WIN_W - 24, 50), (0, 0, 0, 0))
                         _td = PILDraw.Draw(_tim)
-                        _td.rounded_rectangle([0, 0, WIN_W - 25, 39], radius=10, fill=(30, 14, 14, 235))
-                        _td.text(((WIN_W - 24) / 2, 20), tz[0], font=_uifont("zhb", 13), fill=(255, 225, 215, 255), anchor="mm")
-                        _alpha_paste(view, _rgba(_tim), 12, by - 50)
+                        _td.rounded_rectangle([0, 0, WIN_W - 25, 49], radius=12, fill=(30, 14, 14, 240))
+                        _td.text(((WIN_W - 24) / 2, 25), tz[0], font=_uifont("zhb", 16), fill=(255, 230, 220, 255), anchor="mm")
+                        _alpha_paste(view, _rgba(_tim), 12, by - 62)
                     elif tz:
                         ui["toast"] = None
+                if UI_SCALE > 1.01:
+                    view = cv2.resize(view, (DISP_W, DISP_H), interpolation=cv2.INTER_LINEAR)
                 cv2.imshow(WIN, view)
                 # 鍵盤:← →(Windows 2424832/2555904;macOS 63234/63235) 換濾鏡;Esc/Q 關閉;關閉視窗(X)= 離開
                 k = cv2.waitKeyEx(1)
