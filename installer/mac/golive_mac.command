@@ -80,6 +80,7 @@ if pgrep -x OBS >/dev/null 2>&1 && ! nc -z 127.0.0.1 4455 2>/dev/null; then
   for i in $(seq 1 20); do pgrep -x OBS >/dev/null 2>&1 || break; sleep 0.5; done
   pgrep -x OBS >/dev/null 2>&1 && pkill -9 -x OBS 2>/dev/null || true
 fi
+rm -rf "$HOME/Library/Application Support/obs-studio/.sentinel" 2>/dev/null || true   # 清「未正常關閉」標記
 # OBS 改由引擎啟動(帶 --websocket_port/--websocket_password,並輪詢到通),這裡不再開,避免雙開
 
 # ---- 首次:自動啟用 OBS 虛擬相機系統擴充(免主播動手;系統若跳權限請按「允許」) ----

@@ -640,6 +640,18 @@ class ObsControl:
                     s = socket.create_connection(("127.0.0.1", self.port), timeout=1); s.close(); return True
                 except Exception:
                     return False
+            def clear_sentinel():
+                # OBS「上次未正常關閉」標記(.sentinel):存在就停在安全模式詢問框(藏在系統匣沒人按→埠不開)
+                base = (os.path.expanduser("~/Library/Application Support/obs-studio") if sys.platform == "darwin"
+                        else os.path.join(os.environ.get("APPDATA", ""), "obs-studio"))
+                sp = os.path.join(base, ".sentinel")
+                try:
+                    if os.path.isdir(sp):
+                        import shutil as _sh; _sh.rmtree(sp, ignore_errors=True); print("[obs] 已清除 .sentinel")
+                    elif os.path.isfile(sp):
+                        os.remove(sp)
+                except Exception as _e:
+                    print("[obs] 清 sentinel 失敗: %s" % _e)
             try:
                 if port_open():
                     self.connected = True; return
@@ -669,6 +681,7 @@ class ObsControl:
                     except Exception as _e:
                         print("[obs] 寫 websocket 設定失敗: %s" % _e)
                     if not running:
+                        clear_sentinel()
                         app = "/Applications/OBS.app"
                         if not os.path.isdir(app):
                             app = os.path.expanduser("~/Applications/OBS.app")
@@ -686,6 +699,7 @@ class ObsControl:
                         subprocess.run(["taskkill", "/IM", "obs64.exe", "/F"], capture_output=True, creationflags=0x08000000)
                         time.sleep(2); running = False
                     if not running:
+                        clear_sentinel()
                         for exe in (r"C:\Program Files\obs-studio\bin\64bit\obs64.exe",):
                             if os.path.exists(exe):
                                 subprocess.Popen([exe, "--profile", "Prime Stage 直式", "--collection", "Prime Stage 直式",
