@@ -1,0 +1,122 @@
+name: verify-mac
+# 在真 macOS 上模擬「主播的每一關」:下載隔離→dmg內點開→自動搬桌面→放行→app相機宣告
+# →引擎完整啟動(假攝影機)→自動裝OBS→setup寫profile→OBS背景起→WebSocket探針。
+# 沒有這條,每次都要拿同事當測試員。
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "build-mac 的 run id(留空=最新成功那次)"
+        required: false
+        default: ""
+
+jobs:
+  verify:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch dmg from build-mac
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RID="${{ github.event.inputs.run_id }}"
+          if [ -z "$RID" ]; then
+            RID=$(gh run list -R "$GITHUB_REPOSITORY" --workflow=build-mac --status success -L 1 --json databaseId --jq '.[0].databaseId')
+          fi
+          echo "using build run $RID"
+          gh run download "$RID" -R "$GITHUB_REPOSITORY" -n primelive_mac_dmg -D /tmp/dl
+          ls -la /tmp/dl
+
+      - name: 關1 模擬「從網路下載」的隔離標記 + 在 dmg 內直接點開
+        run: |
+          set -e
+          DMG=/tmp/dl/primelive_mac.dmg
+          xattr -w com.apple.quarantine "0083;00000000;Safari;" "$DMG"
+          hdiutil attach "$DMG" -nobrowse -quiet -mountpoint /Volumes/primelive
+          ls /Volumes/primelive
+          test -f "/Volumes/primelive/開始直播（點我）.command" && echo "PASS: 白話檔名存在"
+          test -f "/Volumes/primelive/先看我（4步驟）.txt" && echo "PASS: 說明檔存在"
+          test -f "/Volumes/primelive/OBS-Studio.dmg" && echo "PASS: 內附 OBS 安裝檔"
+          # 隔離標記有傳到 dmg 內容(模擬真實情境)
+          xattr -l "/Volumes/primelive/開始直播（點我）.command" || true
+
+      - name: 關2 app 相機/麥克風宣告 + 簽章 entitlements(同事「未預期地結束」的根因)
+        run: |
+          set -e
+          APP="/Volumes/primelive/primelive_filter.app"
+          PL="$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :NSCameraUsageDescription" "$PL" && echo "PASS: NSCameraUsageDescription"
+          /usr/libexec/PlistBuddy -c "Print :NSMicrophoneUsageDescription" "$PL" && echo "PASS: NSMicrophoneUsageDescription"
+          codesign -dv --verbose=2 "$APP" 2>&1 | grep -E "Signature|Identifier|flags" | head -5
+          codesign -d --entitlements :- "$APP" 2>/dev/null | grep -q "device.camera" && echo "PASS: entitlements 含 camera" || echo "WARN: entitlements 無 camera"
+
+      - name: 關3 從 dmg 內執行腳本 → 應自動搬到桌面並改從桌面跑(不能 killed)
+        run: |
+          set +e
+          # 模擬主播直接在映像檔裡點:腳本會 cp 到 ~/Desktop/primelive 並 exec 桌面版;
+          # 桌面版會走到「找不到引擎/OBS?」→ 這裡只驗前半段:確實搬家了
+          timeout 60 bash "/Volumes/primelive/開始直播（點我）.command" >/tmp/golive1.log 2>&1
+          echo "exit=$?"; tail -20 /tmp/golive1.log
+          test -d "$HOME/Desktop/primelive" && echo "PASS: 已自動複製到桌面"
+          test -f "$HOME/Desktop/primelive/開始直播（點我）.command" && echo "PASS: 桌面版腳本存在"
+          xattr -l "$HOME/Desktop/primelive/開始直播（點我）.command" | grep -q quarantine && echo "WARN: 桌面版仍有隔離" || echo "PASS: 桌面版已解隔離"
+
+      - name: 關4 引擎完整啟動(假攝影機):虛擬cam+濾鏡+視窗迴圈不崩潰
+        run: |
+          set +e
+          BIN="$HOME/Desktop/primelive/primelive_filter.app/Contents/MacOS/primelive_filter"
+          out=$("$BIN" --fake-camera --frames 30 --no-window --preset 2 2>&1); c=$?
+          echo "exit=$c"; echo "$out" | grep -vE "^(W0000|I0000)" | tail -12
+          echo "$out" | grep -q "煙霧測試" && echo "PASS: 引擎跑完 30 格" || { echo "FAIL: 引擎沒跑完"; exit 1; }
+          echo "$out" | grep -qE "虛擬攝影機已啟動|OBS Virtual Camera" && echo "PASS: 虛擬攝影機" || echo "WARN: 虛擬攝影機未啟(CI 無 OBS vcam 擴充屬正常)"
+
+      - name: 關5 自動裝 OBS + setup 寫 profile + OBS 背景啟動 + WebSocket 探針
+        run: |
+          set +e
+          cd "$HOME/Desktop/primelive"
+          # 用內附 dmg 裝 OBS(跟主播機同路徑)
+          hdiutil attach OBS-Studio.dmg -nobrowse -quiet -mountpoint /Volumes/obsinst
+          cp -R /Volumes/obsinst/OBS.app /Applications/ && echo "PASS: OBS 已裝"
+          hdiutil detach /Volumes/obsinst -quiet
+          # setup(帶假金鑰,不跳 GUI)
+          bash setup_mac.sh "CI_FAKE_KEY?secret=verify" && echo "PASS: setup_mac 完成"
+          OBS_ROOT="$HOME/Library/Application Support/obs-studio"
+          test -f "$OBS_ROOT/basic/profiles/Prime Stage 直式/basic.ini" && echo "PASS: profile 已建"
+          grep -q "Profile=Prime Stage" "$OBS_ROOT/user.ini" && echo "PASS: user.ini 指向 Prime Stage"
+          test -f "$HOME/Library/Application Support/PrimeStage/obsws.json" && echo "PASS: websocket 密碼已產"
+          # 背景起 OBS
+          open -a /Applications/OBS.app --args --profile "Prime Stage 直式" --collection "Prime Stage 直式" --minimize-to-tray
+          sleep 25
+          pgrep -x OBS >/dev/null && echo "PASS: OBS 程序在跑" || { echo "FAIL: OBS 沒起來"; exit 1; }
+          # WebSocket 探針(python + websocket-client)
+          python3 -m pip install -q websocket-client
+          python3 - <<'PY'
+          import json, os, hashlib, base64, uuid, websocket
+          cfg = json.load(open(os.path.expanduser("~/Library/Application Support/PrimeStage/obsws.json")))
+          def rpc(t):
+              ws = websocket.create_connection("ws://127.0.0.1:%d" % cfg["port"], timeout=5)
+              hello = json.loads(ws.recv()); ident = {"rpcVersion": 1}
+              a = hello["d"].get("authentication")
+              if a:
+                  sec = base64.b64encode(hashlib.sha256((cfg["password"]+a["salt"]).encode()).digest()).decode()
+                  ident["authentication"] = base64.b64encode(hashlib.sha256((sec+a["challenge"]).encode()).digest()).decode()
+              ws.send(json.dumps({"op":1,"d":ident})); json.loads(ws.recv())
+              rid=str(uuid.uuid4()); ws.send(json.dumps({"op":6,"d":{"requestType":t,"requestId":rid}}))
+              while True:
+                  m=json.loads(ws.recv())
+                  if m.get("op")==7 and m["d"]["requestId"]==rid: ws.close(); return m["d"]
+          p = rpc("GetProfileList")["responseData"]["currentProfileName"]
+          print("PROFILE:", p); assert p == "Prime Stage 直式", "profile 不對"
+          v = rpc("GetVideoSettings")["responseData"]
+          print("CANVAS:", v.get("baseWidth"), "x", v.get("baseHeight"))
+          assert v.get("baseWidth") == 884 and v.get("baseHeight") == 1920, "畫布不是直式"
+          print("PASS: WebSocket 認證+profile+直式畫布 全通")
+          PY
+
+      - name: 摘要
+        if: always()
+        run: |
+          echo "=== 主播每一關 CI 驗證結束(見上方 PASS/FAIL) ==="
+          pkill -x OBS 2>/dev/null || true

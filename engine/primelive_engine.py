@@ -1217,6 +1217,8 @@ def main():
     ap.add_argument("--no-threaded", action="store_true", help="關閉背景抓圖執行緒（除錯用）")
     ap.add_argument("--gpu", action="store_true", help="嘗試用 GPU 跑 MediaPipe（失敗自動退回 CPU）")
     ap.add_argument("--ready-file", default="", help="虛擬攝影機啟動後寫一個旗標檔（給一鍵開播腳本判斷可以開 OBS 了）")
+    ap.add_argument("--fake-camera", action="store_true",
+                    help="測試用:沒有實體鏡頭時,用內建示範圖當攝影機來源(CI 驗證整條管線)")
     ap.add_argument("--obs-vcam-kick", action="store_true",
                     help="macOS 首次自動化:遙控 OBS 啟動→停止虛擬相機以註冊系統擴充,完成即退出")
     args = ap.parse_args()
@@ -1354,7 +1356,27 @@ def main():
         except Exception as e:
             print("[note] 相機權限檢查略過: %s" % type(e).__name__)
 
-    cam_names = list_camera_names()
+    if args.fake_camera:
+        # 假攝影機:示範圖循環當來源(CI/無鏡頭環境驗整條管線:虛擬cam+濾鏡+UI+OBS遙控)
+        _demo = cv2.imread(os.path.join(ASSETS, "demo_female.png"), cv2.IMREAD_COLOR)
+        if _demo is None:
+            _demo = np.full((720, 1280, 3), 40, np.uint8)
+        _demo = cv2.resize(_demo, (args.cap_width, args.cap_height))
+
+        class _FakeCap:
+            def __init__(self, *a, **k): self.n = 0
+            def set(self, *a): return True
+            def read(self):
+                self.n += 1
+                time.sleep(1.0 / 30)
+                fr = _demo.copy()
+                cv2.putText(fr, "FAKE CAM %d" % self.n, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                return True, fr
+            def release(self): pass
+        cv2.VideoCapture = lambda *a, **k: _FakeCap()
+        print("[test] 假攝影機模式(示範圖循環)")
+
+    cam_names = ["Fake Camera"] if args.fake_camera else list_camera_names()
     if cam_names:
         print("[鏡頭] " + " | ".join("%d:%s" % (i, n) for i, n in enumerate(cam_names)))
 
