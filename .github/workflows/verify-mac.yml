@@ -61,7 +61,8 @@ jobs:
           set +e
           # 模擬主播直接在映像檔裡點:腳本會 cp 到 ~/Desktop/primelive 並 exec 桌面版;
           # 桌面版會走到「找不到引擎/OBS?」→ 這裡只驗前半段:確實搬家了
-          timeout 60 bash "/Volumes/primelive/開始直播（點我）.command" >/tmp/golive1.log 2>&1
+          # macOS 無 GNU timeout;用 perl alarm 限時 90 秒(腳本會搬家→exec 桌面版→找不到相機/OBS 屬預期)
+          perl -e 'alarm 90; exec @ARGV' bash "/Volumes/primelive/開始直播（點我）.command" >/tmp/golive1.log 2>&1
           echo "exit=$?"; tail -20 /tmp/golive1.log
           test -d "$HOME/Desktop/primelive" && echo "PASS: 已自動複製到桌面"
           test -f "$HOME/Desktop/primelive/開始直播（點我）.command" && echo "PASS: 桌面版腳本存在"
@@ -71,6 +72,8 @@ jobs:
         run: |
           set +e
           BIN="$HOME/Desktop/primelive/primelive_filter.app/Contents/MacOS/primelive_filter"
+          [ -x "$BIN" ] || BIN="/Volumes/primelive/primelive_filter.app/Contents/MacOS/primelive_filter"
+          echo "engine: $BIN"
           out=$("$BIN" --fake-camera --frames 30 --no-window --preset 2 2>&1); c=$?
           echo "exit=$c"; echo "$out" | grep -vE "^(W0000|I0000)" | tail -12
           echo "$out" | grep -q "煙霧測試" && echo "PASS: 引擎跑完 30 格" || { echo "FAIL: 引擎沒跑完"; exit 1; }
