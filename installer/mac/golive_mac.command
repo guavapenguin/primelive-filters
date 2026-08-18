@@ -110,13 +110,14 @@ open -a "$ENGINE" --args --ready-file "$READY" 2>>"$LOGF"
 sleep 2
 EPID=$(pgrep -n -f "primelive_filter.app/Contents/MacOS/primelive_filter" || echo "")
 ok=""
-for i in $(seq 1 160); do          # 最多 80 秒(含使用者按相機授權的時間)
+# 只要引擎程序還活著就一直等(相機授權框開著多久都行);引擎真的結束才判失敗
+for i in $(seq 1 1200); do         # 上限 10 分鐘
   [ -f "$READY" ] && ok=1 && break
   if [ -n "$EPID" ] && ! kill -0 "$EPID" 2>/dev/null; then break; fi   # 引擎已結束(崩潰)
   sleep 0.5
 done
 if [ -z "$ok" ]; then
-  if ! kill -0 "$EPID" 2>/dev/null; then
+  if [ -z "$EPID" ] || ! kill -0 "$EPID" 2>/dev/null; then
     osascript -e "display dialog \"濾鏡引擎啟動失敗(可能是相機權限被拒或未授權)。\n\n請到 系統設定 → 隱私權與安全性 → 相機/麥克風,把 primelive_filter 打開,再點一次「開始直播」。\n\n仍不行請把這個檔傳給小編:\n$LOGF\" buttons {\"好\"} with icon caution with title \"primelive\"" >/dev/null 2>&1 || true
     open -R "$LOGF" 2>/dev/null || true
     exit 1
