@@ -98,7 +98,7 @@ jobs:
           sleep 25
           pgrep -x OBS >/dev/null && echo "PASS: OBS 程序在跑" || { echo "FAIL: OBS 沒起來"; exit 1; }
           # WebSocket 探針(python + websocket-client)
-          python3 -m pip install -q websocket-client
+          python3 -m pip install -q --break-system-packages websocket-client 2>/dev/null || python3 -m pip install -q --user --break-system-packages websocket-client
           python3 - <<'PY'
           import json, os, hashlib, base64, uuid, websocket
           cfg = json.load(open(os.path.expanduser("~/Library/Application Support/PrimeStage/obsws.json")))
