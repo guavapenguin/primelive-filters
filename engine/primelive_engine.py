@@ -1426,8 +1426,39 @@ def main():
 
     import pyvirtualcam
     OUT_W, OUT_H = W, H                       # 虛擬攝影機固定用第一格的尺寸
-    cam = pyvirtualcam.Camera(width=OUT_W, height=OUT_H, fps=args.target_fps, fmt=pyvirtualcam.PixelFormat.RGB)
-    print("[ok] 虛擬攝影機已啟動：%s（%dx%d@%d）" % (cam.device, OUT_W, OUT_H, args.target_fps))
+
+    class _NullCam:
+        """虛擬攝影機開不了時的替身:視窗/濾鏡/開播鈕照常,只是畫面不送出去(macOS 擴充未啟用時)。"""
+        device = "(未啟用)"
+        def __init__(self, fps): self._dt = 1.0 / max(1, fps); self._t = time.time()
+        def send(self, frame): pass
+        def sleep_until_next_frame(self):
+            self._t += self._dt
+            d = self._t - time.time()
+            if d > 0: time.sleep(d)
+            else: self._t = time.time()
+        def close(self): pass
+
+    cam = None
+    try:
+        cam = pyvirtualcam.Camera(width=OUT_W, height=OUT_H, fps=args.target_fps, fmt=pyvirtualcam.PixelFormat.RGB)
+        print("[ok] 虛擬攝影機已啟動：%s（%dx%d@%d）" % (cam.device, OUT_W, OUT_H, args.target_fps))
+    except Exception as e:
+        print("[錯誤] 虛擬攝影機無法啟動: %s" % e)
+        cam = _NullCam(args.target_fps)
+        if sys.platform == "darwin":
+            # macOS:OBS 虛擬相機系統擴充未啟用/未允許 → 引導使用者到系統設定,程式不崩潰
+            try:
+                import subprocess
+                subprocess.Popen(["osascript", "-e",
+                    'display dialog "第一次使用需要允許「OBS 虛擬相機」擴充功能：\\n\\n'
+                    '1) 打開 系統設定 → 一般 → 登入項目與延伸功能\\n'
+                    '2) 找到 OBS(或「相機延伸功能」)→ 打開開關 → 輸入密碼\\n'
+                    '3) 回來再點一次「開始直播（點我）」\\n\\n'
+                    '（這只需要做一次）" buttons {"好"} default button 1 with icon caution with title "primelive"'])
+                subprocess.Popen(["open", "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"])
+            except Exception:
+                pass
     if args.ready_file:                       # 通知「一鍵開播」腳本：虛擬攝影機好了，可以開 OBS
         try:
             with open(args.ready_file, "w", encoding="utf-8") as _rf:

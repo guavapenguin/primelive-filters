@@ -73,13 +73,24 @@ fi
 
 # ---- 首次:自動啟用 OBS 虛擬相機系統擴充(免主播動手;系統若跳權限請按「允許」) ----
 VCAM_MARK="$PS_DIR/vcam_ok"
-if [ ! -f "$VCAM_MARK" ]; then
-  echo "[開播] 首次啟用虛擬相機擴充(系統若跳出詢問請按「允許」)..."
-  if "$ENGINE_BIN" --obs-vcam-kick; then
-    mkdir -p "$PS_DIR"; touch "$VCAM_MARK"
-  else
-    echo "[note] 擴充啟用未完成,畫面若全黑請重跑一次本檔"
+vcam_ready() {   # OBS 虛擬相機擴充是否已啟用(systemextensionsctl 列出且 activated)
+  systemextensionsctl list 2>/dev/null | grep -i "obs" | grep -qi "activated enabled"
+}
+if [ ! -f "$VCAM_MARK" ] && ! vcam_ready; then
+  echo "[開播] 首次啟用虛擬相機擴充..."
+  "$ENGINE_BIN" --obs-vcam-kick >/dev/null 2>&1 || true
+  # 等使用者在系統設定按允許(最多 2 分鐘,期間每 3 秒檢查一次)
+  if ! vcam_ready; then
+    osascript -e 'display dialog "第一次使用要允許「OBS 虛擬相機」延伸功能(只做一次)：\n\n即將打開「系統設定」→ 找到 OBS(相機延伸功能)→ 把開關打開 → 輸入密碼\n\n完成後回來按「好」" buttons {"好"} default button 1 with icon note with title "primelive"' >/dev/null 2>&1 || true
+    open "x-apple.systempreferences:com.apple.LoginItems-Settings.extension" 2>/dev/null || true
+    for i in $(seq 1 40); do vcam_ready && break; sleep 3; done
   fi
+fi
+if vcam_ready; then
+  mkdir -p "$PS_DIR"; touch "$VCAM_MARK"
+  echo "[開播] 虛擬相機擴充已啟用"
+else
+  echo "[note] 虛擬相機擴充仍未啟用:引擎會以「無虛擬相機」模式開啟(視窗與濾鏡可用,推流畫面需擴充啟用後才會有)"
 fi
 
 # ---- 開引擎(直式視窗:濾鏡盤+開始直播鈕);記錄 log,崩潰時明確提示而非反覆重開 ----
