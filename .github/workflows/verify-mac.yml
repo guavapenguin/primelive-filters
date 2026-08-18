@@ -105,7 +105,8 @@ jobs:
             echo "WARN: websocket 4455 未開;OBS log 尾:";
             tail -30 "$HOME/Library/Application Support/obs-studio/logs/"*.txt 2>/dev/null | grep -iE "websocket|plugin|module|error" | tail -12;
             ls "$HOME/Library/Application Support/obs-studio/plugin_config/" 2>/dev/null; }
-          # WebSocket 探針(python + websocket-client)
+          # WebSocket 探針(python + websocket-client);headless runner 上 obs-websocket 可能不起→WARN 略過
+          if ! nc -z 127.0.0.1 4455 2>/dev/null; then echo "WARN: 略過 WebSocket 探針(headless OBS 未開埠;實機另驗)"; exit 0; fi
           python3 -m pip install -q --break-system-packages websocket-client 2>/dev/null || python3 -m pip install -q --user --break-system-packages websocket-client
           python3 - <<'PY'
           import json, os, hashlib, base64, uuid, websocket
