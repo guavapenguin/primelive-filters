@@ -774,6 +774,25 @@ class ObsControl:
                 self._ensuring = False
         threading.Thread(target=run, daemon=True).start()
 
+    def set_stream_key_async(self, key):
+        """即時把新金鑰推給 OBS(SetStreamServiceSettings),免重開 OBS。連不上就算了(service.json 已寫,下次啟動生效)。"""
+        def run():
+            try:
+                server = "rtmp://ingest.primestage.live:1935/live"
+                try:    # 用 service.json 現有 server(廠商換正式位址也跟著對)
+                    sd = json.load(open(_obs_profile_service_path(), encoding="utf-8"))
+                    server = sd.get("settings", {}).get("server", server)
+                except Exception:
+                    pass
+                self._rpc("SetStreamServiceSettings", {
+                    "streamServiceType": "rtmp_custom",
+                    "streamServiceSettings": {
+                        "server": server, "key": key, "use_auth": False, "bwtest": False}})
+                self.connected = True
+            except Exception:
+                self.connected = False
+        threading.Thread(target=run, daemon=True).start()
+
     def poll_async(self):
         if self.busy:
             return
@@ -1154,13 +1173,82 @@ def build_topbar(cur, demo_label, live):
     d.rounded_rectangle([WIN_W - 38, 6, WIN_W - 8, 32], radius=8, fill=(255, 255, 255, 50))
     d.line([WIN_W - 30, 12, WIN_W - 16, 26], fill=(240, 242, 246, 255), width=3)
     d.line([WIN_W - 16, 12, WIN_W - 30, 26], fill=(240, 242, 246, 255), width=3)
+    # 設定鈕(切換鏡頭/換金鑰);自畫齒輪圖示避免字型缺 emoji
+    d.rounded_rectangle([WIN_W - 120, 6, WIN_W - 46, 30], radius=12, fill=(255, 255, 255, 45))
+    gx, gy = WIN_W - 108, 18
+    d.ellipse([gx - 6, gy - 6, gx + 6, gy + 6], outline=(245, 246, 250, 255), width=2)
+    d.ellipse([gx - 2, gy - 2, gx + 2, gy + 2], fill=(245, 246, 250, 255))
+    d.text((WIN_W - 74, 18), "設定", font=zhb(14), fill=(245, 246, 250, 255), anchor="mm")
     if live.get("streaming"):
-        d.ellipse([WIN_W - 60, 12, WIN_W - 50, 22], fill=(235, 70, 60, 255))
-        d.text((WIN_W - 66, 8), "LIVE", font=ensb(12), fill=(255, 120, 110, 255), anchor="ra")
+        d.ellipse([WIN_W - 158, 12, WIN_W - 148, 22], fill=(235, 70, 60, 255))
+        d.text((WIN_W - 164, 8), "LIVE", font=ensb(12), fill=(255, 120, 110, 255), anchor="ra")
     if demo_label:
         d.rounded_rectangle([WIN_W - 150, 34, WIN_W - 10, 66], radius=16, fill=(255, 255, 255, 60))
         d.text((WIN_W - 80, 50), demo_label, font=zhb(14), fill=(255, 245, 230, 255), anchor="mm")
     return _rgba(im)
+
+def _obs_profile_service_path():
+    base = (os.environ.get("APPDATA", "") if sys.platform == "win32"
+            else os.path.expanduser("~/Library/Application Support"))
+    return os.path.join(base, "obs-studio", "basic", "profiles", "Prime Stage 直式", "service.json")
+
+def _prompt_key():
+    """跳原生輸入框問金鑰(Win=PowerShell InputBox,mac=osascript);回傳去空白後字串或 ''。"""
+    try:
+        import subprocess
+        if sys.platform == "win32":
+            ps = ('Add-Type -AssemblyName Microsoft.VisualBasic;'
+                  '[Microsoft.VisualBasic.Interaction]::InputBox('
+                  '"請貼上新的直播金鑰`n(直播主後台 → 設定 → OBS平台金鑰 → 複製)","primelive 換金鑰","")')
+            out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                                 capture_output=True, text=True, timeout=120)
+            return (out.stdout or "").strip()
+        if sys.platform == "darwin":
+            scr = ('text returned of (display dialog "請貼上新的直播金鑰\\n(直播主後台 → 設定 → OBS平台金鑰 → 複製)"'
+                   ' default answer "" with title "primelive 換金鑰")')
+            out = subprocess.run(["osascript", "-e", scr], capture_output=True, text=True, timeout=120)
+            return (out.stdout or "").strip()
+    except Exception:
+        pass
+    return ""
+
+def _write_stream_key(key):
+    """把金鑰寫進 OBS profile 的 service.json(保留其餘設定)。"""
+    try:
+        p = _obs_profile_service_path()
+        d = json.load(open(p, encoding="utf-8")) if os.path.exists(p) else {"type": "rtmp_custom", "settings": {}}
+        d.setdefault("settings", {})["key"] = key
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False)
+        return True
+    except Exception as e:
+        print("[key] 寫入失敗: %s" % e)
+        return False
+
+def build_settings_panel(cam_name):
+    """設定選單:切換鏡頭 / 換金鑰。回傳 (RGBA, {item:rect(相對面板)}, 面板位置(x,y))。"""
+    PW_, PH_ = WIN_W - 60, 232
+    px, py = 30, 180
+    im = PILImage.new("RGBA", (PW_, PH_), (0, 0, 0, 0))
+    d = PILDraw.Draw(im)
+    d.rounded_rectangle([0, 0, PW_ - 1, PH_ - 1], radius=18, fill=(24, 24, 32, 245), outline=(80, 84, 96, 255), width=2)
+    zhb = lambda s: _uifont("zhb", s); zh = lambda s: _uifont("zh", s)
+    d.text((PW_ // 2, 24), "設定", font=zhb(18), fill=(240, 200, 120, 255), anchor="mm")
+    rects = {}
+    # 切換鏡頭
+    d.rounded_rectangle([20, 52, PW_ - 20, 104], radius=12, fill=(58, 62, 74, 255))
+    d.text((PW_ // 2, 70), "切換鏡頭", font=zhb(16), fill=(255, 255, 255, 255), anchor="mm")
+    d.text((PW_ // 2, 90), "目前：" + (cam_name or "—"), font=zh(11), fill=(190, 195, 205, 255), anchor="mm")
+    rects["cam"] = (20, 52, PW_ - 20, 104)
+    # 換金鑰
+    d.rounded_rectangle([20, 116, PW_ - 20, 156], radius=12, fill=(58, 62, 74, 255))
+    d.text((PW_ // 2, 136), "換直播金鑰", font=zhb(16), fill=(255, 255, 255, 255), anchor="mm")
+    rects["key"] = (20, 116, PW_ - 20, 156)
+    # 關閉
+    d.rounded_rectangle([20, 172, PW_ - 20, 210], radius=12, fill=(44, 46, 56, 255))
+    d.text((PW_ // 2, 191), "關閉", font=zhb(15), fill=(220, 222, 228, 255), anchor="mm")
+    rects["close"] = (20, 172, PW_ - 20, 210)
+    return _rgba(im), rects, (px, py)
 
 def build_tray(presets, thumbs, active, scroll, tw, th):
     """底部半透明濾鏡盤(可捲動);回傳 (RGBA, 局部命中矩形, max_scroll, 高)。"""
@@ -1608,6 +1696,12 @@ def main():
             print("[ok] 自動選用鏡頭 %d：%s" % (target, nm))
     args.camera = target
 
+    # 可切換的實體鏡頭清單(排除虛擬相機;手機除非 --allow-phone)＝視窗「切換鏡頭」用
+    cam_choices = [i for i, n in enumerate(cam_names or [])
+                   if "virtual" not in n.lower() and (args.allow_phone or not _is_phone(n))]
+    if target not in cam_choices and not args.fake_camera:
+        cam_choices = ([target] + cam_choices) if cam_names else cam_choices
+
     cap, frame = open_cam(target)
     if cap is None and args.allow_phone:
         # 手機/連線相機可能要幾秒才連上(手機需按「允許」) → 多等幾次再放棄，避免誤退回 OBSBOT
@@ -1691,7 +1785,9 @@ def main():
           "last_act": time.time(), "tray_vis": 1.0,
           "btn_rect": (0, 0, 0, 0), "handle_rect": (0, 0, 0, 0),
           "chip_rect": (WIN_W - 150, 34, WIN_W - 10, 66),
-          "close_rect": (WIN_W - 38, 6, WIN_W - 8, 32), "quit": False}
+          "close_rect": (WIN_W - 38, 6, WIN_W - 8, 32), "quit": False,
+          "set_rect": (WIN_W - 120, 6, WIN_W - 46, 30), "settings_open": False,
+          "cur_cam": args.camera, "do_cam_switch": False, "do_key_change": False}
     strip_tw = TRAY_TW
     demo_imgs = {}
     for g, fn in (("f", "demo_female.png"), ("m", "demo_male.png")):
@@ -1726,11 +1822,27 @@ def main():
                     ui["dirty"] = True
             elif event == cv2.EVENT_LBUTTONUP:
                 if ui["drag"] is not None and not ui["moved"]:
+                    # 設定選單開啟時:優先處理選單點擊(其餘 UI 讓位)
+                    if ui.get("settings_open"):
+                        px, py = ui.get("_set_pos", (30, 180))
+                        for k, (rx0, ry0, rx1, ry1) in ui.get("_set_rects", {}).items():
+                            if px + rx0 <= x <= px + rx1 and py + ry0 <= y <= py + ry1:
+                                if k == "cam":   ui["do_cam_switch"] = True
+                                elif k == "key": ui["do_key_change"] = True
+                                ui["settings_open"] = False; ui["dirty"] = True
+                                break
+                        else:
+                            ui["settings_open"] = False; ui["dirty"] = True   # 點面板外=關閉
+                        ui["drag"] = None
+                        return
                     bx0, by0, bx1, by1 = ui["btn_rect"]
                     cx0, cy0, cx1, cy1 = ui["chip_rect"]
                     qx0, qy0, qx1, qy1 = ui["close_rect"]
+                    sx0, sy0, sx1, sy1 = ui["set_rect"]
                     if qx0 <= x <= qx1 and qy0 <= y <= qy1:
                         ui["quit"] = True                # 右上 ✕:結束程式
+                    elif sx0 <= x <= sx1 and sy0 <= y <= sy1:
+                        ui["settings_open"] = True; ui["dirty"] = True   # 設定鈕
                     elif bx0 <= x <= bx1 and by0 <= y <= by1:
                         ui["live_toggle"] = True     # 開始/停止直播
                     elif cx0 <= x <= cx1 and cy0 <= y <= cy1:
@@ -1863,6 +1975,46 @@ def main():
                         and thumbs_map.get("live") and thumbs_map["live"][0] is None:
                     worker.start(frame, strip_tw, strip_th, thumbs_map["live"])
                 # 開始/停止直播(遙控背景 OBS,不卡輸出)
+                # 切換鏡頭(熱換,不重開;開不了就跳回上一個並提示)
+                if ui.get("do_cam_switch"):
+                    ui["do_cam_switch"] = False
+                    if reader is not None and cam_choices and len(cam_choices) > 1:
+                        cur = ui.get("cur_cam", args.camera)
+                        pos = cam_choices.index(cur) if cur in cam_choices else 0
+                        nxt = cam_choices[(pos + 1) % len(cam_choices)]
+                        newcap, _f = open_cam(nxt)
+                        if newcap is not None:
+                            reader.swap(newcap)
+                            ui["cur_cam"] = nxt; args.camera = nxt
+                            nm = cam_names[nxt] if nxt < len(cam_names) else str(nxt)
+                            ui["toast"] = ("已切換鏡頭：" + nm, time.time() + 4)
+                            try:    # 記住選擇(下次開機沿用)
+                                base = (os.environ.get("APPDATA", "") if sys.platform == "win32"
+                                        else os.path.expanduser("~/Library/Application Support"))
+                                dp = os.path.join(base, "PrimeStage", "devices.json")
+                                dd = json.load(open(dp, encoding="utf-8")) if os.path.exists(dp) else {}
+                                dd["cameraName"] = nm
+                                os.makedirs(os.path.dirname(dp), exist_ok=True)
+                                json.dump(dd, open(dp, "w", encoding="utf-8"), ensure_ascii=False)
+                            except Exception:
+                                pass
+                        else:
+                            nm = cam_names[nxt] if nxt < len(cam_names) else str(nxt)
+                            ui["toast"] = ("鏡頭「%s」無法開啟(可能被其他程式佔用)" % nm, time.time() + 6)
+                    else:
+                        ui["toast"] = ("只偵測到一個鏡頭,無法切換", time.time() + 4)
+                    ui["dirty"] = True
+                # 換直播金鑰(跳輸入框→寫 service.json→即時推給 OBS)
+                if ui.get("do_key_change"):
+                    ui["do_key_change"] = False
+                    newkey = _prompt_key()
+                    if newkey:
+                        if _write_stream_key(newkey):
+                            obs_ctl.set_stream_key_async(newkey)
+                            ui["toast"] = ("金鑰已更新", time.time() + 4)
+                        else:
+                            ui["toast"] = ("金鑰寫入失敗", time.time() + 5)
+                    ui["dirty"] = True
                 if ui.get("live_toggle"):
                     ui["live_toggle"] = False
                     ui["toggle_at"] = time.time()
@@ -1944,6 +2096,12 @@ def main():
                         _alpha_paste(view, _rgba(_tim), 12, by - 62)
                     elif tz:
                         ui["toast"] = None
+                # 設定面板(切換鏡頭/換金鑰)蓋在最上層
+                if ui.get("settings_open"):
+                    cur_cam_name = cam_names[ui.get("cur_cam", 0)] if (cam_names and ui.get("cur_cam", 0) < len(cam_names)) else "—"
+                    panel, srects, spos = build_settings_panel(cur_cam_name)
+                    ui["_set_rects"] = srects; ui["_set_pos"] = spos
+                    _alpha_paste(view, panel, spos[0], spos[1])
                 if UI_SCALE > 1.01:
                     view = cv2.resize(view, (DISP_W, DISP_H), interpolation=cv2.INTER_LINEAR)
                 cv2.imshow(WIN, view)

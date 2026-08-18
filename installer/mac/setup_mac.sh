@@ -18,10 +18,17 @@ PROF_DIR="$OBS_ROOT/basic/profiles/$PROFILE"
 SCENES_DIR="$OBS_ROOT/basic/scenes"
 mkdir -p "$PROF_DIR" "$SCENES_DIR" "$PS_DIR"
 
-if [ -z "$KEY" ]; then
+# 升級刷新保留舊金鑰:先讀 service.json 現有金鑰
+OLD_KEY=""
+if [ -f "$PROF_DIR/service.json" ]; then
+  OLD_KEY=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['settings'].get('key',''))" "$PROF_DIR/service.json" 2>/dev/null || echo "")
+fi
+if [ -z "$KEY" ] && [ -n "$OLD_KEY" ]; then KEY="$OLD_KEY"; fi   # 已有金鑰(升級)→沿用,不重問
+if [ -z "$KEY" ] && [ "${NOPROMPT:-}" != "1" ]; then
   KEY=$(osascript -e 'text returned of (display dialog "請貼上你的「串流金鑰」\n(直播主後台 → 設定 → OBS平台金鑰 → 複製)\n只會存在你這台電腦。" default answer "" with title "Prime Stage 設定")' 2>/dev/null || echo "")
 fi
 KEY="$(echo -n "$KEY" | tr -d '[:space:]')"
+[ -z "$KEY" ] && KEY="$OLD_KEY"   # 取消也不清掉舊金鑰
 
 # ---- profile ----
 cat > "$PROF_DIR/basic.ini" <<EOF
@@ -161,4 +168,5 @@ printf '{"alerts_enabled":false,"auth_required":true,"first_load":false,"server_
   > "$OBS_ROOT/plugin_config/obs-websocket/config.json"
 printf '{"port":4455,"password":"%s"}' "$WSPWD" > "$WS_JSON"
 
+printf '8' > "$PS_DIR/config_ver.txt"   # 設定版本戳記(golive 判斷升級刷新用)
 echo "[ok] Prime Stage 直式設定完成(macOS)"

@@ -111,8 +111,19 @@ if (-not $obsExe -or -not $engineExe) {
     Note "安裝完成。"
 }
 
-# ---- ② 首次設定(或 -Setup):選設備 → OBS 設定(問金鑰) ------------------------
+# ---- ②' 升級刷新:設定版本落後→用新版模板重寫 OBS 設定(保留金鑰+設備,主播無感)----
+$CONFIG_VER = "8"
+$verFile = Join-Path $env:APPDATA "PrimeStage\config_ver.txt"
+$curVer = ""
+if (Test-Path $verFile) { $curVer = (Get-Content $verFile -Raw -ErrorAction SilentlyContinue).Trim() }
 $profDir = Join-Path (Join-Path $env:APPDATA "obs-studio") "basic\profiles\Prime Stage 直式"
+if ((Test-Path $profDir) -and ($curVer -ne $CONFIG_VER) -and -not $Setup) {
+    Note "偵測到升級(設定版本 $curVer → $CONFIG_VER),自動刷新 OBS 設定(保留你的金鑰與設備)..."
+    $obsSetupPs = Join-Path $here "setup.ps1"
+    if (Test-Path $obsSetupPs) { & $obsSetupPs -Camera primelive -NoPrompt }   # -NoPrompt=不打擾,金鑰由 setup 自動沿用
+}
+
+# ---- ② 首次設定(或 -Setup):選設備 → OBS 設定(問金鑰) ------------------------
 if ($Setup -or -not (Test-Path $profDir)) {
     $picker = @((Join-Path $here "選設備.ps1"), (Join-Path $here "devices.ps1")) |
               Where-Object { Test-Path $_ } | Select-Object -First 1

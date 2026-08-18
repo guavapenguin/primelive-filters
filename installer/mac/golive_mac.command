@@ -69,8 +69,14 @@ if [ -f "$SVC" ]; then
   KEY_SET=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['settings'].get('key',''))" "$SVC" 2>/dev/null || \
             /usr/bin/plutil -extract settings.key raw -o - "$SVC" 2>/dev/null || echo "")
 fi
+CONFIG_VER="8"
+VER_FILE="$PS_DIR/config_ver.txt"
+CUR_VER=""; [ -f "$VER_FILE" ] && CUR_VER=$(tr -d '[:space:]' < "$VER_FILE")
 if [ -z "$KEY_SET" ] || [ "${1:-}" = "--setup" ]; then
   bash "$HERE/setup_mac.sh" || die "OBS 設定失敗。"
+elif [ "$CUR_VER" != "$CONFIG_VER" ]; then
+  echo "[開播] 偵測到升級($CUR_VER→$CONFIG_VER),自動刷新設定(保留金鑰與設備)..."
+  NOPROMPT=1 bash "$HERE/setup_mac.sh" || true   # 金鑰由 setup 自動沿用,不打擾
 fi
 
 # ---- 背景開 OBS(主播不用看它) ----

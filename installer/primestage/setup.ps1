@@ -82,11 +82,18 @@ if ($running) {
     for ($i = 0; $i -lt 20 -and (Get-Process obs64 -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 300 }
 }
 
-# ---- 3. 問串流金鑰 -----------------------------------------------------------
+# ---- 3. 問串流金鑰(升級刷新時保留舊金鑰,不重問)------------------------------
+$oldKey = ""
+$svcPath = Join-Path $obsRoot "basic\profiles\$ProfileName\service.json"
+if (Test-Path $svcPath) {
+    try { $oldKey = (Get-Content $svcPath -Raw -Encoding UTF8 | ConvertFrom-Json).settings.key } catch {}
+}
+if (-not $Key) { $Key = $oldKey }                 # 已有金鑰(升級)→直接沿用
 if (-not $Key) {
     $Key = Ask-Box "請貼上你的『串流金鑰』`n(直播主後台 → 設定 → OBS平台金鑰 → 複製)`n`n只會存在你這台電腦、不會外傳。" "Prime Stage 一鍵設定 - 貼上金鑰"
 }
 $Key = "$Key".Trim()
+if (-not $Key) { $Key = $oldKey }                 # 取消也不清掉舊金鑰
 if (-not $Key -and -not $NoPrompt) {
     $ans = [System.Windows.Forms.MessageBox]::Show("你沒有貼金鑰。要先把其他設定都設好、之後再自己到 OBS『設定→直播』貼金鑰嗎？`n`n「是」= 先設好其他；「否」= 取消", "沒有金鑰", 'YesNo', 'Warning')
     if ($ans -eq "No") { Write-Host "取消。"; exit 1 }
@@ -347,4 +354,8 @@ $camStep
 
 要還原：user.ini / global.ini 已備份為 *.primestage.bak
 "@ "Prime Stage 一鍵設定 完成"
+# 設定版本戳記(golive 靠它判斷升級後要不要刷新設定)
+$psDir = Join-Path $env:APPDATA "PrimeStage"
+New-Item -ItemType Directory -Force -Path $psDir | Out-Null
+Set-Content -Path (Join-Path $psDir "config_ver.txt") -Value "8" -Encoding Ascii -NoNewline
 Write-Host "=== 完成 ===" -ForegroundColor Green
