@@ -1044,9 +1044,12 @@ def build_topbar(cur, demo_label, live):
     zhb = lambda s: _uifont("zhb", s); zh = lambda s: _uifont("zh", s); ensb = lambda s: _uifont("ensb", s)
     d.text((10, 6), "primelive", font=ensb(12), fill=(233, 193, 122, 255))
     d.text((10, 26), cur.get("name", "") + " · " + cur.get("en", ""), font=zh(9), fill=(250, 214, 166, 255))
+    # 右上角 ✕ 關閉(mac 的系統關閉鈕不會通知 OpenCV 視窗,自畫一顆)
+    d.rounded_rectangle([WIN_W - 30, 4, WIN_W - 6, 24], radius=6, fill=(255, 255, 255, 40))
+    d.text((WIN_W - 18, 14), "✕", font=ensb(12), fill=(240, 242, 246, 255), anchor="mm")
     if live.get("streaming"):
-        d.ellipse([WIN_W - 16, 9, WIN_W - 8, 17], fill=(235, 70, 60, 255))
-        d.text((WIN_W - 22, 7), "LIVE", font=ensb(9), fill=(255, 120, 110, 255), anchor="ra")
+        d.ellipse([WIN_W - 50, 9, WIN_W - 42, 17], fill=(235, 70, 60, 255))
+        d.text((WIN_W - 56, 7), "LIVE", font=ensb(9), fill=(255, 120, 110, 255), anchor="ra")
     if demo_label:
         d.rounded_rectangle([WIN_W - 96, 26, WIN_W - 8, 44], radius=9, fill=(255, 255, 255, 36))
         d.text((WIN_W - 52, 35), demo_label, font=zh(8.5), fill=(255, 235, 210, 255), anchor="mm")
@@ -1580,7 +1583,8 @@ def main():
           "moved": False, "demo": "f", "toggle": False, "live_toggle": False,
           "last_act": time.time(), "tray_vis": 1.0,
           "btn_rect": (0, 0, 0, 0), "handle_rect": (0, 0, 0, 0),
-          "chip_rect": (WIN_W - 96, 26, WIN_W - 8, 44)}
+          "chip_rect": (WIN_W - 96, 26, WIN_W - 8, 44),
+          "close_rect": (WIN_W - 30, 4, WIN_W - 6, 24), "quit": False}
     strip_tw = TRAY_TW
     demo_imgs = {}
     for g, fn in (("f", "demo_female.png"), ("m", "demo_male.png")):
@@ -1616,7 +1620,10 @@ def main():
                 if ui["drag"] is not None and not ui["moved"]:
                     bx0, by0, bx1, by1 = ui["btn_rect"]
                     cx0, cy0, cx1, cy1 = ui["chip_rect"]
-                    if bx0 <= x <= bx1 and by0 <= y <= by1:
+                    qx0, qy0, qx1, qy1 = ui["close_rect"]
+                    if qx0 <= x <= qx1 and qy0 <= y <= qy1:
+                        ui["quit"] = True                # 右上 ✕:結束程式
+                    elif bx0 <= x <= bx1 and by0 <= y <= by1:
                         ui["live_toggle"] = True     # 開始/停止直播
                     elif cx0 <= x <= cx1 and cy0 <= y <= cy1:
                         ui["toggle"] = True          # 示範模特切換
@@ -1831,7 +1838,7 @@ def main():
                 # 鍵盤:← →(Windows 2424832/2555904;macOS 63234/63235) 換濾鏡;Esc/Q 關閉;關閉視窗(X)= 離開
                 k = cv2.waitKeyEx(1)
                 kc = (k & 0xFF) if k > 0 else -1
-                if kc in (27, ord("q"), ord("Q")):
+                if kc in (27, ord("q"), ord("Q")) or ui.get("quit"):
                     break
                 if k in (2424832, 2555904, 63234, 63235):
                     ui["last_act"] = time.time()
@@ -1855,6 +1862,22 @@ def main():
                       % (n, faces, n / max(1e-6, time.time() - t0), adap.scale))
                 break
     finally:
+        # 收尾:直播中先停止,再請 OBS 優雅關閉(不留背景程序)
+        try:
+            if 'obs_ctl' in locals() and obs_ctl.connected:
+                if obs_ctl.streaming:
+                    try: obs_ctl._rpc("StopStream")
+                    except Exception: pass
+                try:
+                    import subprocess as _sp
+                    if sys.platform == "darwin":
+                        _sp.Popen(["osascript", "-e", 'quit app "OBS"'])
+                    elif sys.platform == "win32":
+                        _sp.Popen(["taskkill", "/IM", "obs64.exe"], creationflags=0x08000000)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         cam.close()
         if threaded and reader is not None:
             reader.stop()
