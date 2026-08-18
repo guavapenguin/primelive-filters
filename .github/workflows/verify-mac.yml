@@ -10,6 +10,10 @@ on:
         required: false
         default: ""
 
+permissions:
+  actions: read      # 抓 build-mac 的 artifact
+  contents: read
+
 jobs:
   verify:
     runs-on: macos-14
