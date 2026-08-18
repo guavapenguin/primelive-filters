@@ -75,7 +75,9 @@ fi
 
 # ---- 背景開 OBS(主播不用看它) ----
 if ! pgrep -x OBS >/dev/null 2>&1; then
-  open -a "$OBS_APP" --args --profile "Prime Stage 直式" --collection "Prime Stage 直式" --minimize-to-tray
+  WSPWD=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['password'])" "$PS_DIR/obsws.json" 2>/dev/null || echo "")
+  # 用命令列直接開 WebSocket(不吃 plugin_config 路徑差異;OBS 官方參數):引擎「開始直播」鈕靠它遙控
+  open -a "$OBS_APP" --args --profile "Prime Stage 直式" --collection "Prime Stage 直式" --minimize-to-tray        --websocket_port 4455 --websocket_password "$WSPWD"
 fi
 
 # ---- 首次:自動啟用 OBS 虛擬相機系統擴充(免主播動手;系統若跳權限請按「允許」) ----

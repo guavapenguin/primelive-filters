@@ -1680,7 +1680,15 @@ def main():
                 # 開始/停止直播(遙控背景 OBS,不卡輸出)
                 if ui.get("live_toggle"):
                     ui["live_toggle"] = False
+                    ui["toggle_at"] = time.time()
+                    ui["toggle_was"] = obs_ctl.streaming
                     obs_ctl.toggle_stream_async()
+                    ui["dirty"] = True
+                # 按下後 4 秒內若狀態沒變且未連線 → 顯示提示(按鈕一定有反應)
+                if ui.get("toggle_at") and not obs_ctl.busy and time.time() - ui["toggle_at"] > 4:
+                    if obs_ctl.streaming == ui.get("toggle_was") and not obs_ctl.connected:
+                        ui["toast"] = ("連不到 OBS,請重新點「開始直播（點我）」再試", time.time() + 6)
+                    ui["toggle_at"] = None
                     ui["dirty"] = True
                 if n == 30 or (n % 240 == 0):     # 定期同步 OBS 狀態(~8秒)
                     obs_ctl.poll_async()
@@ -1734,12 +1742,25 @@ def main():
                     by = (tray_y - btn.shape[0] - 10) if tv > 0.02 else (WIN_H - btn.shape[0] - 34)
                     _alpha_paste(view, btn, bx, by)
                     ui["btn_rect"] = (bx, by, bx + btn.shape[1], by + btn.shape[0])
+                    # 提示 toast(按鈕上方,半透明)
+                    tz = ui.get("toast")
+                    if tz and time.time() < tz[1]:
+                        _tim = PILImage.new("RGBA", (WIN_W - 24, 30), (0, 0, 0, 0))
+                        _td = PILDraw.Draw(_tim)
+                        _td.rounded_rectangle([0, 0, WIN_W - 25, 29], radius=8, fill=(40, 20, 20, 210))
+                        _td.text(((WIN_W - 24) / 2, 15), tz[0], font=_uifont("zh", 10), fill=(255, 210, 200, 255), anchor="mm")
+                        _alpha_paste(view, _rgba(_tim), 12, by - 40)
+                    elif tz:
+                        ui["toast"] = None
                 cv2.imshow(WIN, view)
-                # 鍵盤只有 ← →(其餘交給滑鼠);關閉視窗(X)= 離開
+                # 鍵盤:← →(Windows 2424832/2555904;macOS 63234/63235) 換濾鏡;Esc/Q 關閉;關閉視窗(X)= 離開
                 k = cv2.waitKeyEx(1)
-                if k in (2424832, 2555904):
+                kc = (k & 0xFF) if k > 0 else -1
+                if kc in (27, ord("q"), ord("Q")):
+                    break
+                if k in (2424832, 2555904, 63234, 63235):
                     ui["last_act"] = time.time()
-                    step = -1 if k == 2424832 else 1
+                    step = -1 if k in (2424832, 63234) else 1
                     ui["active"] = (ui["active"] + step) % len(presets)
                     tx = 10 + ui["active"] * (strip_tw + 6)
                     if tx - ui["scroll"] < 10:
