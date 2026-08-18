@@ -208,6 +208,10 @@ R_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161,
 L_EYE = [263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466]  # 影像右＝主角左眼
 R_EYE_OUTER, L_EYE_OUTER = 33, 263     # 眼尾外角（魚尾紋起點）
 R_EYE_BOT, L_EYE_BOT = 145, 374        # 眼睛下緣（眼下提亮錨點）
+R_EYE_TOP = [246, 161, 160, 159, 158, 157, 173]   # 主角右眼上緣（眼影錨點）
+L_EYE_TOP = [466, 388, 387, 386, 385, 384, 398]   # 主角左眼上緣
+R_BROW = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46]     # 主角右眉
+L_BROW = [300, 293, 334, 296, 336, 285, 295, 282, 283, 276]  # 主角左眉
 CHEEK_R, CHEEK_L = 50, 280             # 兩頰顴骨（腮紅）
 
 def _ipts(lms, idx, W, H):
@@ -349,6 +353,41 @@ def apply_beauty(rgb, lms, params):
             cv2.ellipse(m, (int(cx - X0), int(cy - Y0)), (int(rx), int(ry)), 0, 0, 360, 1.0, -1)
             m = cv2.GaussianBlur(m, (0, 0), rx * 0.7)
             out[Y0:Y1, X0:X1] = _recolor_roi(out[Y0:Y1, X0:X1], m, params["blush"], float(params.get("blush_strength", 0.2)))
+
+    # 5.5) 眼影（上眼瞼往眉方向的柔和色帶，保亮度上色）
+    if params.get("eyeshadow"):
+        es_s = float(params.get("eyeshadow_strength", 0.25))
+        for top_idx in (R_EYE_TOP, L_EYE_TOP):
+            lid = _ipts(lms, top_idx, W, H)
+            if len(lid) < 3:
+                continue
+            up = lid.copy()
+            up[:, 1] -= face_w * 0.055           # 往上延伸到眼摺
+            poly = np.vstack([lid, up[::-1]])
+            X0, Y0, X1, Y1 = _roi_box(poly, W, H, 0.12, face_w)
+            if X1 <= X0 or Y1 <= Y0:
+                continue
+            m = np.zeros((Y1 - Y0, X1 - X0), np.float32)
+            cv2.fillConvexPoly(m, cv2.convexHull((poly - [X0, Y0]).astype(np.int32)), 1.0)
+            m = cv2.GaussianBlur(m, (0, 0), face_w * 0.03)
+            out[Y0:Y1, X0:X1] = _recolor_roi(out[Y0:Y1, X0:X1], m, params["eyeshadow"], es_s)
+
+    # 5.6) 眉毛（眉形區壓深＝更立體有神；男女通用，男生用低強度做「乾淨眉」）
+    if params.get("brow"):
+        bw_s = float(params.get("brow", 0.0))
+        for bidx in (R_BROW, L_BROW):
+            bp = _ipts(lms, bidx, W, H)
+            if len(bp) < 3:
+                continue
+            X0, Y0, X1, Y1 = _roi_box(bp, W, H, 0.06, face_w)
+            if X1 <= X0 or Y1 <= Y0:
+                continue
+            m = np.zeros((Y1 - Y0, X1 - X0), np.float32)
+            cv2.fillConvexPoly(m, cv2.convexHull((bp - [X0, Y0]).astype(np.int32)), 1.0)
+            m = cv2.GaussianBlur(m, (0, 0), face_w * 0.012) * min(1.0, bw_s)
+            roi = out[Y0:Y1, X0:X1].astype(np.float32)
+            a = m[..., None]
+            out[Y0:Y1, X0:X1] = (roi * (1 - 0.35 * a)).astype(np.uint8)   # 壓深 35%×強度
 
     # 6) 修容（臉部外側 ~45% 壓暗，做出收窄陰影；限中下半臉避免額頭/太陽穴變髒）
     if contour > 0:

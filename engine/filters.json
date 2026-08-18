@@ -678,6 +678,139 @@
    "en": "Mono",
    "cat": "color",
    "lut": "luts/primelive_heibai.cube"
+  },
+  {
+   "key": "",
+   "name": "韓系裸妝",
+   "en": "K-Nude",
+   "cat": "beauty",
+   "beauty": {
+    "smooth": 0.5,
+    "whiten": 0.15,
+    "lipstick": [
+     207,
+     112,
+     128
+    ],
+    "lip_strength": 0.35,
+    "blush": [
+     222,
+     159,
+     160
+    ],
+    "blush_strength": 0.16,
+    "eyeshadow": [
+     180,
+     120,
+     120
+    ],
+    "eyeshadow_strength": 0.18,
+    "brow": 0.25
+   }
+  },
+  {
+   "key": "",
+   "name": "氣質電眼",
+   "en": "Elegant Eyes",
+   "cat": "beauty",
+   "beauty": {
+    "smooth": 0.55,
+    "whiten": 0.1,
+    "lipstick": [
+     224,
+     106,
+     98
+    ],
+    "lip_strength": 0.4,
+    "blush": [
+     235,
+     155,
+     150
+    ],
+    "blush_strength": 0.16,
+    "eyeshadow": [
+     190,
+     130,
+     120
+    ],
+    "eyeshadow_strength": 0.15,
+    "brow": 0.25,
+    "contour": 0.12
+   }
+  },
+  {
+   "key": "",
+   "name": "深邃電眼",
+   "en": "Deep Eyes",
+   "cat": "beauty",
+   "beauty": {
+    "smooth": 0.55,
+    "lipstick": [
+     187,
+     71,
+     77
+    ],
+    "lip_strength": 0.5,
+    "blush": [
+     225,
+     130,
+     140
+    ],
+    "blush_strength": 0.2,
+    "eyeshadow": [
+     150,
+     95,
+     100
+    ],
+    "eyeshadow_strength": 0.28,
+    "brow": 0.35,
+    "contour": 0.2
+   }
+  },
+  {
+   "key": "",
+   "name": "男生淨顏",
+   "en": "Men Clean",
+   "cat": "beauty",
+   "beauty": {
+    "smooth": 0.4,
+    "whiten": 0.08,
+    "brow": 0.2
+   }
+  },
+  {
+   "key": "",
+   "name": "男生立體",
+   "en": "Men Define",
+   "cat": "beauty",
+   "beauty": {
+    "smooth": 0.35,
+    "contour": 0.22,
+    "brow": 0.3,
+    "wrinkle": 0.2
+   }
+  },
+  {
+   "key": "",
+   "name": "男生氣色",
+   "en": "Men Fresh",
+   "cat": "beauty",
+   "beauty": {
+    "smooth": 0.4,
+    "lipstick": [
+     180,
+     110,
+     105
+    ],
+    "lip_strength": 0.12,
+    "blush": [
+     220,
+     160,
+     150
+    ],
+    "blush_strength": 0.06,
+    "brow": 0.22
+   }
   }
  ]
 }
