@@ -95,8 +95,16 @@ jobs:
           test -f "$HOME/Library/Application Support/PrimeStage/obsws.json" && echo "PASS: websocket 密碼已產"
           # 背景起 OBS
           open -a /Applications/OBS.app --args --profile "Prime Stage 直式" --collection "Prime Stage 直式" --minimize-to-tray
-          sleep 25
+          # 等 OBS 起來 + websocket 埠開(最多 90 秒;無頭 runner 首啟較慢)
+          for i in $(seq 1 45); do
+            pgrep -x OBS >/dev/null && (nc -z 127.0.0.1 4455 2>/dev/null) && break
+            sleep 2
+          done
           pgrep -x OBS >/dev/null && echo "PASS: OBS 程序在跑" || { echo "FAIL: OBS 沒起來"; exit 1; }
+          nc -z 127.0.0.1 4455 && echo "PASS: websocket 4455 已開" || {
+            echo "WARN: websocket 4455 未開;OBS log 尾:";
+            tail -30 "$HOME/Library/Application Support/obs-studio/logs/"*.txt 2>/dev/null | grep -iE "websocket|plugin|module|error" | tail -12;
+            ls "$HOME/Library/Application Support/obs-studio/plugin_config/" 2>/dev/null; }
           # WebSocket 探針(python + websocket-client)
           python3 -m pip install -q --break-system-packages websocket-client 2>/dev/null || python3 -m pip install -q --user --break-system-packages websocket-client
           python3 - <<'PY'
