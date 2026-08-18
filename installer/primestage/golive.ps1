@@ -152,8 +152,11 @@ if (Get-Process obs64 -ErrorAction SilentlyContinue) {
     Note "OBS 已經開著。"
 } else {
     Note "背景開啟 OBS(縮到系統匣;主播用引擎視窗的「開始直播」鈕即可)..."
+    $wsPwd = ""
+    try { $wsPwd = (Get-Content (Join-Path $env:APPDATA "PrimeStage\obsws.json") -Raw -Encoding UTF8 | ConvertFrom-Json).password } catch {}
     # --profile/--collection 直接指定,不受 user.ini 初始化狀態影響;--minimize-to-tray 藏起 OBS
     Start-Process -FilePath $obsExe -WorkingDirectory (Split-Path -Parent $obsExe) `
-        -ArgumentList '--profile','Prime Stage 直式','--collection','Prime Stage 直式','--minimize-to-tray' | Out-Null
+        -ArgumentList '--profile','Prime Stage 直式','--collection','Prime Stage 直式','--minimize-to-tray','--disable-shutdown-check',
+                      '--websocket_port','4455','--websocket_password',$wsPwd | Out-Null
 }
 Note "完成。引擎視窗滾輪選濾鏡;OBS 按「開始串流」後回平台「確認開播」。"

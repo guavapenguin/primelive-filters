@@ -674,16 +674,23 @@ class ObsControl:
                             app = os.path.expanduser("~/Applications/OBS.app")
                         subprocess.Popen(["open", "-a", app, "--args",
                                           "--profile", "Prime Stage 直式", "--collection", "Prime Stage 直式",
-                                          "--minimize-to-tray", "--websocket_port", str(self.port),
+                                          "--minimize-to-tray", "--disable-shutdown-check",
+                                          "--websocket_port", str(self.port),
                                           "--websocket_password", self.password])
                         print("[obs] 引擎自行啟動 OBS(帶 websocket 參數)")
                 elif sys.platform == "win32":
                     running = subprocess.run(["tasklist", "/FI", "IMAGENAME eq obs64.exe"], capture_output=True, text=True).stdout.find("obs64.exe") >= 0
+                    if running:
+                        # 活著但埠沒開(多半卡在「不乾淨關閉」對話框):關掉重帶
+                        print("[obs] OBS 在跑但 websocket 埠沒開,先關閉重帶")
+                        subprocess.run(["taskkill", "/IM", "obs64.exe", "/F"], capture_output=True, creationflags=0x08000000)
+                        time.sleep(2); running = False
                     if not running:
                         for exe in (r"C:\Program Files\obs-studio\bin\64bit\obs64.exe",):
                             if os.path.exists(exe):
                                 subprocess.Popen([exe, "--profile", "Prime Stage 直式", "--collection", "Prime Stage 直式",
-                                                  "--minimize-to-tray", "--websocket_port", str(self.port),
+                                                  "--minimize-to-tray", "--disable-shutdown-check",
+                                                  "--websocket_port", str(self.port),
                                                   "--websocket_password", self.password], cwd=os.path.dirname(exe))
                                 print("[obs] 引擎自行啟動 OBS(帶 websocket 參數)")
                                 break
