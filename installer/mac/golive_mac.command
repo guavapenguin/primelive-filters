@@ -74,11 +74,13 @@ if [ -z "$KEY_SET" ] || [ "${1:-}" = "--setup" ]; then
 fi
 
 # ---- 背景開 OBS(主播不用看它) ----
-if ! pgrep -x OBS >/dev/null 2>&1; then
-  WSPWD=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['password'])" "$PS_DIR/obsws.json" 2>/dev/null || echo "")
-  # 用命令列直接開 WebSocket(不吃 plugin_config 路徑差異;OBS 官方參數):引擎「開始直播」鈕靠它遙控
-  open -a "$OBS_APP" --args --profile "Prime Stage 直式" --collection "Prime Stage 直式" --minimize-to-tray        --websocket_port 4455 --websocket_password "$WSPWD"
+# 若已有「沒開遙控埠」的舊 OBS 在跑,先關掉(引擎會用正確參數重新帶起)
+if pgrep -x OBS >/dev/null 2>&1 && ! nc -z 127.0.0.1 4455 2>/dev/null; then
+  osascript -e 'quit app "OBS"' >/dev/null 2>&1 || true
+  for i in $(seq 1 20); do pgrep -x OBS >/dev/null 2>&1 || break; sleep 0.5; done
+  pgrep -x OBS >/dev/null 2>&1 && pkill -9 -x OBS 2>/dev/null || true
 fi
+# OBS 改由引擎啟動(帶 --websocket_port/--websocket_password,並輪詢到通),這裡不再開,避免雙開
 
 # ---- 首次:自動啟用 OBS 虛擬相機系統擴充(免主播動手;系統若跳權限請按「允許」) ----
 VCAM_MARK="$PS_DIR/vcam_ok"

@@ -626,6 +626,69 @@ class ObsControl:
                 self.busy = False
         threading.Thread(target=run, daemon=True).start()
 
+    def ensure_obs_async(self):
+        """背景:OBS 沒在跑或埠沒開→引擎自己把 OBS 帶起來(帶 websocket 參數),輪詢到通;
+        連不上時把診斷寫進 log(OBS 是否活著/埠是否開/OBS log 尾)。"""
+        if getattr(self, "_ensuring", False):
+            return
+        self._ensuring = True
+        def run():
+            import socket, subprocess, glob
+            def port_open():
+                try:
+                    s = socket.create_connection(("127.0.0.1", self.port), timeout=1); s.close(); return True
+                except Exception:
+                    return False
+            try:
+                if port_open():
+                    self.connected = True; return
+                if sys.platform == "darwin":
+                    running = subprocess.run(["pgrep", "-x", "OBS"], capture_output=True).returncode == 0
+                    if not running:
+                        app = "/Applications/OBS.app"
+                        if not os.path.isdir(app):
+                            app = os.path.expanduser("~/Applications/OBS.app")
+                        subprocess.Popen(["open", "-a", app, "--args",
+                                          "--profile", "Prime Stage 直式", "--collection", "Prime Stage 直式",
+                                          "--minimize-to-tray", "--websocket_port", str(self.port),
+                                          "--websocket_password", self.password])
+                        print("[obs] 引擎自行啟動 OBS(帶 websocket 參數)")
+                elif sys.platform == "win32":
+                    running = subprocess.run(["tasklist", "/FI", "IMAGENAME eq obs64.exe"], capture_output=True, text=True).stdout.find("obs64.exe") >= 0
+                    if not running:
+                        for exe in (r"C:\Program Files\obs-studio\bin\64bit\obs64.exe",):
+                            if os.path.exists(exe):
+                                subprocess.Popen([exe, "--profile", "Prime Stage 直式", "--collection", "Prime Stage 直式",
+                                                  "--minimize-to-tray", "--websocket_port", str(self.port),
+                                                  "--websocket_password", self.password], cwd=os.path.dirname(exe))
+                                print("[obs] 引擎自行啟動 OBS(帶 websocket 參數)")
+                                break
+                for _ in range(90):
+                    time.sleep(1)
+                    if port_open():
+                        self.connected = True
+                        print("[obs] websocket 已連通")
+                        return
+                # 診斷
+                self.connected = False
+                print("[obs] 90 秒內 websocket 埠 %d 未開。" % self.port)
+                if sys.platform == "darwin":
+                    alive = subprocess.run(["pgrep", "-x", "OBS"], capture_output=True).returncode == 0
+                    print("[obs] OBS 程序活著=%s" % alive)
+                    logs = sorted(glob.glob(os.path.expanduser("~/Library/Application Support/obs-studio/logs/*.txt")))
+                    if logs:
+                        try:
+                            tail = open(logs[-1], encoding="utf-8", errors="ignore").read().splitlines()[-40:]
+                            print("[obs] OBS log 尾(%s):" % os.path.basename(logs[-1]))
+                            for ln in tail:
+                                if any(k in ln.lower() for k in ("websocket", "module", "plugin", "error", "fail", "load")):
+                                    print("   " + ln)
+                        except Exception:
+                            pass
+            finally:
+                self._ensuring = False
+        threading.Thread(target=run, daemon=True).start()
+
     def poll_async(self):
         if self.busy:
             return
@@ -1034,7 +1097,8 @@ def build_livebtn(live):
     zhb = lambda s: _uifont("zhb", s)
     if live.get("busy"):
         d.rounded_rectangle([0, 0, W, H], radius=23, fill=(70, 74, 86, 210))
-        d.text((W / 2, H / 2), "處理中…", font=zhb(13), fill=(220, 222, 228, 255), anchor="mm")
+        d.text((W / 2, H / 2), "準備 OBS 中…" if not live.get("connected") else "處理中…",
+               font=zhb(13), fill=(220, 222, 228, 255), anchor="mm")
     elif live.get("streaming"):
         d.rounded_rectangle([0, 0, W, H], radius=23, fill=(40, 42, 52, 205), outline=(150, 156, 168, 180), width=1)
         d.text((W / 2, H / 2), "■ 停止直播", font=zhb(14), fill=(255, 170, 160, 255), anchor="mm")
@@ -1225,8 +1289,13 @@ def main():
     args = ap.parse_args()
 
     if args.obs_vcam_kick:
-        # 讓 OBS 自己註冊虛擬相機擴充(啟動→停止,註冊會永久保留);等 OBS websocket 最多 30 秒
+        # 讓 OBS 自己註冊虛擬相機擴充(啟動→停止,註冊會永久保留);先確保 OBS 帶 websocket 起來
         ctl = ObsControl()
+        ctl.ensure_obs_async()
+        for _ in range(95):
+            if ctl.connected:
+                break
+            time.sleep(1)
         ok = False
         for _ in range(30):
             try:
@@ -1682,7 +1751,11 @@ def main():
                     ui["live_toggle"] = False
                     ui["toggle_at"] = time.time()
                     ui["toggle_was"] = obs_ctl.streaming
-                    obs_ctl.toggle_stream_async()
+                    if not obs_ctl.connected:
+                        obs_ctl.ensure_obs_async()      # 沒連上就先把 OBS 帶起來/等它開埠
+                        ui["toast"] = ("準備 OBS 中…請稍候再按一次", time.time() + 8)
+                    else:
+                        obs_ctl.toggle_stream_async()
                     ui["dirty"] = True
                 # 按下後 4 秒內若狀態沒變且未連線 → 顯示提示(按鈕一定有反應)
                 if ui.get("toggle_at") and not obs_ctl.busy and time.time() - ui["toggle_at"] > 4:
@@ -1690,10 +1763,12 @@ def main():
                         ui["toast"] = ("連不到 OBS,請重新點「開始直播（點我）」再試", time.time() + 6)
                     ui["toggle_at"] = None
                     ui["dirty"] = True
-                if n == 30 or (n % 240 == 0):     # 定期同步 OBS 狀態(~8秒)
+                if n == 30:
+                    obs_ctl.ensure_obs_async()      # 開場就確保 OBS 起來+websocket 通
+                elif n % 240 == 0:                  # 之後定期同步狀態(~8秒)
                     obs_ctl.poll_async()
                 # 浮層快取(髒/縮圖進度/直播狀態變了才重建)
-                lstate = (obs_ctl.streaming, obs_ctl.connected, obs_ctl.busy)
+                lstate = (obs_ctl.streaming, obs_ctl.connected, obs_ctl.busy or getattr(obs_ctl, "_ensuring", False))
                 ver = worker.version
                 if ui["dirty"] or ver != ui.get("_ver") or lstate != ui.get("_ls"):
                     live = {"streaming": lstate[0], "connected": lstate[1], "busy": lstate[2]}
