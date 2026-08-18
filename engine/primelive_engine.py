@@ -1084,12 +1084,12 @@ def _rgba(pil_img):
 
 def build_topbar(cur, demo_label, live):
     """頂部半透明資訊列:品牌+目前濾鏡+示範chip+直播狀態。"""
-    H = 48
-    im = PILImage.new("RGBA", (WIN_W, H), (10, 10, 14, 150))
+    H = 58
+    im = PILImage.new("RGBA", (WIN_W, H), (10, 10, 14, 175))
     d = PILDraw.Draw(im)
     zhb = lambda s: _uifont("zhb", s); zh = lambda s: _uifont("zh", s); ensb = lambda s: _uifont("ensb", s)
-    d.text((10, 6), "primelive", font=ensb(12), fill=(233, 193, 122, 255))
-    d.text((10, 26), cur.get("name", "") + " · " + cur.get("en", ""), font=zh(9), fill=(250, 214, 166, 255))
+    d.text((10, 5), "primelive", font=ensb(13), fill=(233, 193, 122, 255))
+    d.text((10, 26), "目前濾鏡：" + cur.get("name", ""), font=zhb(14), fill=(255, 255, 255, 255))
     # 右上角 ✕ 關閉(mac 的系統關閉鈕不會通知 OpenCV 視窗,自畫一顆)
     d.rounded_rectangle([WIN_W - 30, 4, WIN_W - 6, 24], radius=6, fill=(255, 255, 255, 40))
     d.line([WIN_W - 23, 9, WIN_W - 13, 19], fill=(240, 242, 246, 255), width=2)
@@ -1098,13 +1098,13 @@ def build_topbar(cur, demo_label, live):
         d.ellipse([WIN_W - 50, 9, WIN_W - 42, 17], fill=(235, 70, 60, 255))
         d.text((WIN_W - 56, 7), "LIVE", font=ensb(9), fill=(255, 120, 110, 255), anchor="ra")
     if demo_label:
-        d.rounded_rectangle([WIN_W - 96, 26, WIN_W - 8, 44], radius=9, fill=(255, 255, 255, 36))
-        d.text((WIN_W - 52, 35), demo_label, font=zh(8.5), fill=(255, 235, 210, 255), anchor="mm")
+        d.rounded_rectangle([WIN_W - 118, 28, WIN_W - 8, 52], radius=12, fill=(255, 255, 255, 50))
+        d.text((WIN_W - 63, 40), demo_label, font=zhb(11), fill=(255, 245, 230, 255), anchor="mm")
     return _rgba(im)
 
 def build_tray(presets, thumbs, active, scroll, tw, th):
     """底部半透明濾鏡盤(可捲動);回傳 (RGBA, 局部命中矩形, max_scroll, 高)。"""
-    PAD = 10; GAP = 6; LBL = 24
+    PAD = 10; GAP = 6; LBL = 28
     H = 12 + th + LBL
     n = len(presets)
     content_w = PAD * 2 + n * tw + (n - 1) * GAP
@@ -1134,36 +1134,36 @@ def build_tray(presets, thumbs, active, scroll, tw, th):
             d.rounded_rectangle([x - 1, ty - 1, x + tw + 1, ty + th + 1], radius=9,
                                 outline=(240, 164, 96, 255), width=2)
         nm = p.get("name", "")
-        d.text((x + tw / 2, ty + th + 3), nm, font=zhb(8.6) if on else zh(8.6),
-               fill=(255, 220, 170, 255) if on else (235, 236, 240, 220), anchor="ma")
+        d.text((x + tw / 2, ty + th + 3), nm, font=zhb(11) if on else zh(11),
+               fill=(255, 220, 170, 255) if on else (245, 246, 250, 240), anchor="ma")
         rects.append((int(x), ty, int(x + tw), ty + th, i))
     return _rgba(im), rects, max_scroll, H
 
 def build_livebtn(live):
     """浮動「開始直播」膠囊鈕(半透明)。"""
-    W, H = 176, 46
+    W, H = 232, 58
     im = PILImage.new("RGBA", (W, H), (0, 0, 0, 0))
     d = PILDraw.Draw(im)
     zhb = lambda s: _uifont("zhb", s)
     if live.get("busy"):
-        d.rounded_rectangle([0, 0, W, H], radius=23, fill=(70, 74, 86, 210))
+        d.rounded_rectangle([0, 0, W, H], radius=29, fill=(58, 62, 74, 235), outline=(150, 156, 168, 200), width=2)
         d.text((W / 2, H / 2), "準備 OBS 中…" if not live.get("connected") else "處理中…",
-               font=zhb(13), fill=(220, 222, 228, 255), anchor="mm")
+               font=zhb(18), fill=(255, 255, 255, 255), anchor="mm")
     elif live.get("streaming"):
-        d.rounded_rectangle([0, 0, W, H], radius=23, fill=(40, 42, 52, 205), outline=(150, 156, 168, 180), width=1)
-        d.text((W / 2, H / 2), "■ 停止直播", font=zhb(14), fill=(255, 170, 160, 255), anchor="mm")
+        d.rounded_rectangle([0, 0, W, H], radius=29, fill=(40, 42, 52, 230), outline=(200, 205, 215, 220), width=2)
+        d.text((W / 2, H / 2), "■ 停止直播", font=zhb(19), fill=(255, 190, 180, 255), anchor="mm")
     else:
-        d.rounded_rectangle([0, 0, W, H], radius=23, fill=(212, 60, 52, 225))
-        d.text((W / 2, H / 2), "● 開始直播", font=zhb(14), fill=(255, 246, 243, 255), anchor="mm")
+        d.rounded_rectangle([0, 0, W, H], radius=29, fill=(216, 56, 48, 240))
+        d.text((W / 2, H / 2), "● 開始直播", font=zhb(19), fill=(255, 255, 255, 255), anchor="mm")
     return _rgba(im)
 
 def build_handle():
     """濾鏡盤收起後的喚醒把手。"""
-    W, H = 96, 22
+    W, H = 110, 26
     im = PILImage.new("RGBA", (W, H), (0, 0, 0, 0))
     d = PILDraw.Draw(im)
-    d.rounded_rectangle([0, 0, W, H], radius=11, fill=(12, 12, 18, 140))
-    d.text((W / 2, H / 2), "︿ 濾鏡", font=_uifont("zh", 9), fill=(240, 242, 246, 230), anchor="mm")
+    d.rounded_rectangle([0, 0, W, H], radius=13, fill=(12, 12, 18, 170))
+    d.text((W / 2, H / 2), "︿ 濾鏡", font=_uifont("zhb", 11), fill=(245, 247, 250, 240), anchor="mm")
     return _rgba(im)
 
 
@@ -1630,7 +1630,7 @@ def main():
           "moved": False, "demo": "f", "toggle": False, "live_toggle": False,
           "last_act": time.time(), "tray_vis": 1.0,
           "btn_rect": (0, 0, 0, 0), "handle_rect": (0, 0, 0, 0),
-          "chip_rect": (WIN_W - 96, 26, WIN_W - 8, 44),
+          "chip_rect": (WIN_W - 118, 28, WIN_W - 8, 52),
           "close_rect": (WIN_W - 30, 4, WIN_W - 6, 24), "quit": False}
     strip_tw = TRAY_TW
     demo_imgs = {}
@@ -1875,11 +1875,11 @@ def main():
                     # 提示 toast(按鈕上方,半透明)
                     tz = ui.get("toast")
                     if tz and time.time() < tz[1]:
-                        _tim = PILImage.new("RGBA", (WIN_W - 24, 30), (0, 0, 0, 0))
+                        _tim = PILImage.new("RGBA", (WIN_W - 24, 40), (0, 0, 0, 0))
                         _td = PILDraw.Draw(_tim)
-                        _td.rounded_rectangle([0, 0, WIN_W - 25, 29], radius=8, fill=(40, 20, 20, 210))
-                        _td.text(((WIN_W - 24) / 2, 15), tz[0], font=_uifont("zh", 10), fill=(255, 210, 200, 255), anchor="mm")
-                        _alpha_paste(view, _rgba(_tim), 12, by - 40)
+                        _td.rounded_rectangle([0, 0, WIN_W - 25, 39], radius=10, fill=(30, 14, 14, 235))
+                        _td.text(((WIN_W - 24) / 2, 20), tz[0], font=_uifont("zhb", 13), fill=(255, 225, 215, 255), anchor="mm")
+                        _alpha_paste(view, _rgba(_tim), 12, by - 50)
                     elif tz:
                         ui["toast"] = None
                 cv2.imshow(WIN, view)
