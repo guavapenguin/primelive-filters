@@ -154,6 +154,9 @@ if (Get-Process obs64 -ErrorAction SilentlyContinue) {
     Note "背景開啟 OBS(縮到系統匣;主播用引擎視窗的「開始直播」鈕即可)..."
     $wsPwd = ""
     try { $wsPwd = (Get-Content (Join-Path $env:APPDATA "PrimeStage\obsws.json") -Raw -Encoding UTF8 | ConvertFrom-Json).password } catch {}
+    # 清 OBS「上次未正常關閉」標記(.sentinel),否則 OBS 停在安全模式詢問框(藏在系統匣沒人按→遙控埠不開)
+    $sent = Join-Path $env:APPDATA "obs-studio\.sentinel"
+    if (Test-Path $sent) { try { [System.IO.Directory]::Delete($sent, $true) } catch {} }
     # --profile/--collection 直接指定,不受 user.ini 初始化狀態影響;--minimize-to-tray 藏起 OBS
     Start-Process -FilePath $obsExe -WorkingDirectory (Split-Path -Parent $obsExe) `
         -ArgumentList '--profile','Prime Stage 直式','--collection','Prime Stage 直式','--minimize-to-tray','--disable-shutdown-check',
