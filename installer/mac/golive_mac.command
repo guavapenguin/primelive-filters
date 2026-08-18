@@ -82,12 +82,24 @@ if [ ! -f "$VCAM_MARK" ]; then
   fi
 fi
 
-# ---- 開引擎(直式視窗:濾鏡盤+開始直播鈕) ----
+# ---- 開引擎(直式視窗:濾鏡盤+開始直播鈕);記錄 log,崩潰時明確提示而非反覆重開 ----
 READY="/tmp/primelive_ready.flag"
+LOGF="$HOME/Library/Logs/primelive_engine.log"
 rm -f "$READY"
-open -n "$ENGINE" --args --ready-file "$READY"
+"$ENGINE_BIN" --ready-file "$READY" >>"$LOGF" 2>&1 &
+EPID=$!
+ok=""
 for i in $(seq 1 80); do
-  [ -f "$READY" ] && break
+  [ -f "$READY" ] && ok=1 && break
+  if ! kill -0 "$EPID" 2>/dev/null; then break; fi   # 引擎已結束(崩潰)
   sleep 0.5
 done
+if [ -z "$ok" ]; then
+  if ! kill -0 "$EPID" 2>/dev/null; then
+    osascript -e "display dialog \"濾鏡引擎啟動失敗(可能是相機權限被拒或未授權)。\n\n請到 系統設定 → 隱私權與安全性 → 相機/麥克風,把 primelive_filter 打開,再點一次「開始直播」。\n\n仍不行請把這個檔傳給小編:\n$LOGF\" buttons {\"好\"} with icon caution with title \"primelive\"" >/dev/null 2>&1 || true
+    open -R "$LOGF" 2>/dev/null || true
+    exit 1
+  fi
+  echo "[note] 引擎仍在啟動中(較慢的電腦需多等一下)"
+fi
 echo "[開播] 完成。引擎視窗選濾鏡→按「● 開始直播」。"

@@ -1315,14 +1315,44 @@ def main():
         print("[note] 找不到 selfie_segmenter.task，換背景功能停用")
 
     def open_cam(idx):
-        c = cv2.VideoCapture(idx, CAP_BACKEND)
-        c.set(cv2.CAP_PROP_FRAME_WIDTH, args.cap_width)
-        c.set(cv2.CAP_PROP_FRAME_HEIGHT, args.cap_height)
-        ok, fr = c.read()
-        if ok and fr is not None:
-            return c, fr
-        c.release()
+        try:
+            c = cv2.VideoCapture(idx, CAP_BACKEND)
+            c.set(cv2.CAP_PROP_FRAME_WIDTH, args.cap_width)
+            c.set(cv2.CAP_PROP_FRAME_HEIGHT, args.cap_height)
+            ok, fr = c.read()
+            if ok and fr is not None:
+                return c, fr
+            c.release()
+        except Exception as e:      # 權限被拒等:回 None 讓上層給訊息,不要崩潰
+            print("[note] 開鏡頭 %s 失敗: %s %s" % (idx, type(e).__name__, e))
         return None, None
+
+    if sys.platform == "darwin":
+        # macOS:主動請求相機權限(讓系統跳「允許」對話框,而不是 TCC 靜默拒絕/殺程序)
+        try:
+            import ctypes, ctypes.util
+            avf = ctypes.cdll.LoadLibrary(ctypes.util.find_library("AVFoundation"))
+            objc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("objc"))
+            objc.objc_getClass.restype = ctypes.c_void_p
+            objc.sel_registerName.restype = ctypes.c_void_p
+            objc.objc_msgSend.restype = ctypes.c_long
+            objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+            AVCaptureDevice = objc.objc_getClass(b"AVCaptureDevice")
+            sel = objc.sel_registerName(b"authorizationStatusForMediaType:")
+            # AVMediaTypeVideo 常數字串
+            CF = ctypes.cdll.LoadLibrary(ctypes.util.find_library("CoreFoundation"))
+            CF.CFStringCreateWithCString.restype = ctypes.c_void_p
+            CF.CFStringCreateWithCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32]
+            vide = CF.CFStringCreateWithCString(None, b"vide", 0x08000100)
+            status = objc.objc_msgSend(AVCaptureDevice, sel, vide)
+            print("[mac] 相機權限狀態: %d (0=未決定 1=受限 2=拒絕 3=允許)" % status)
+            if status == 0:
+                # requestAccessForMediaType:completionHandler: 需 block;改用開一次 VideoCapture 觸發系統詢問
+                _t = cv2.VideoCapture(0, CAP_BACKEND); time.sleep(1.5); _t.release()
+            elif status == 2:
+                print("[錯誤] 相機權限被拒。請到 系統設定→隱私權與安全性→相機 開啟 primelive_filter。")
+        except Exception as e:
+            print("[note] 相機權限檢查略過: %s" % type(e).__name__)
 
     cam_names = list_camera_names()
     if cam_names:

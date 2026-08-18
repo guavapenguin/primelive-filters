@@ -27,6 +27,20 @@ echo "[3/4] 複製模型/設定/素材進 .app..."
 cp "$ENG/face_landmarker.task" "$ENG/selfie_segmenter.task" "$ENG/filters.json" "$RES/"
 cp -R "$ASSETS" "$RES/assets"
 
+# macOS 相機/麥克風權限:Info.plist 必須有用途說明,否則 TCC 不跳詢問直接 kill(=「未預期地結束」)
+PLIST="$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'primelive 需要使用攝影機以套用直播濾鏡'" "$PLIST" 2>/dev/null || \
+/usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription 'primelive 需要使用攝影機以套用直播濾鏡'" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'primelive 需要使用麥克風以進行直播'" "$PLIST" 2>/dev/null || \
+/usr/libexec/PlistBuddy -c "Set :NSMicrophoneUsageDescription 'primelive 需要使用麥克風以進行直播'" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :LSMinimumSystemVersion string '12.0'" "$PLIST" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :NSHighResolutionCapable bool true" "$PLIST" 2>/dev/null || true
+echo "[plist] 相機/麥克風用途說明已寫入"
+# 未簽章版也做 ad-hoc 簽章:讓 entitlements(相機/麥克風)生效、bundle 一致,減少 TCC 直接殺程序
+if [ -z "${SIGN_IDENTITY:-}" ]; then
+  codesign --force --deep --sign - --entitlements "$HERE/entitlements.plist" "$APP" 2>/dev/null && echo "[sign] ad-hoc 簽章完成(試用版)"
+fi
+
 # ---- 簽章(有 Developer ID 憑證時;CI 由 SIGN_IDENTITY 傳入) ----
 if [ -n "${SIGN_IDENTITY:-}" ]; then
   echo "[sign] codesign --deep --options runtime ($SIGN_IDENTITY)"
