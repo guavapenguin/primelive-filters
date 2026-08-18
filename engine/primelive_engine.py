@@ -570,6 +570,7 @@ class ObsControl:
         self.streaming = False
         self.connected = False
         self.busy = False
+        self.diag = ""
         try:   # 設定流程(setup.ps1)產生的連線資訊:埠+隨機密碼
             base = (os.environ.get("APPDATA", "") if sys.platform == "win32"
                     else os.path.expanduser("~/Library/Application Support"))
@@ -642,8 +643,31 @@ class ObsControl:
             try:
                 if port_open():
                     self.connected = True; return
+                self.diag = ""
                 if sys.platform == "darwin":
                     running = subprocess.run(["pgrep", "-x", "OBS"], capture_output=True).returncode == 0
+                    if running:
+                        # 已在跑但埠沒開:open --args 對已開的 App 無效 → 先優雅關閉再重帶
+                        print("[obs] OBS 在跑但 websocket 埠沒開,先關閉重帶")
+                        subprocess.run(["osascript", "-e", 'quit app "OBS"'], capture_output=True)
+                        for _ in range(20):
+                            time.sleep(0.5)
+                            if subprocess.run(["pgrep", "-x", "OBS"], capture_output=True).returncode != 0:
+                                break
+                        running = subprocess.run(["pgrep", "-x", "OBS"], capture_output=True).returncode == 0
+                        if running:
+                            subprocess.run(["pkill", "-9", "-x", "OBS"], capture_output=True); time.sleep(1)
+                            running = False
+                    # 不靠參數:寫入 obs-websocket 設定(OBS 沒在跑時寫才不會被覆蓋)
+                    try:
+                        cfgd = os.path.expanduser("~/Library/Application Support/obs-studio/plugin_config/obs-websocket")
+                        os.makedirs(cfgd, exist_ok=True)
+                        with open(os.path.join(cfgd, "config.json"), "w", encoding="utf-8") as _f:
+                            json.dump({"alerts_enabled": False, "auth_required": True, "first_load": False,
+                                       "server_enabled": True, "server_password": self.password,
+                                       "server_port": self.port}, _f)
+                    except Exception as _e:
+                        print("[obs] 寫 websocket 設定失敗: %s" % _e)
                     if not running:
                         app = "/Applications/OBS.app"
                         if not os.path.isdir(app):
@@ -675,6 +699,7 @@ class ObsControl:
                 if sys.platform == "darwin":
                     alive = subprocess.run(["pgrep", "-x", "OBS"], capture_output=True).returncode == 0
                     print("[obs] OBS 程序活著=%s" % alive)
+                    self.diag = ("OBS 沒有啟動" if not alive else "OBS 已開但遙控埠沒開")
                     logs = sorted(glob.glob(os.path.expanduser("~/Library/Application Support/obs-studio/logs/*.txt")))
                     if logs:
                         try:
@@ -1046,7 +1071,8 @@ def build_topbar(cur, demo_label, live):
     d.text((10, 26), cur.get("name", "") + " · " + cur.get("en", ""), font=zh(9), fill=(250, 214, 166, 255))
     # 右上角 ✕ 關閉(mac 的系統關閉鈕不會通知 OpenCV 視窗,自畫一顆)
     d.rounded_rectangle([WIN_W - 30, 4, WIN_W - 6, 24], radius=6, fill=(255, 255, 255, 40))
-    d.text((WIN_W - 18, 14), "✕", font=ensb(12), fill=(240, 242, 246, 255), anchor="mm")
+    d.line([WIN_W - 23, 9, WIN_W - 13, 19], fill=(240, 242, 246, 255), width=2)
+    d.line([WIN_W - 13, 9, WIN_W - 23, 19], fill=(240, 242, 246, 255), width=2)
     if live.get("streaming"):
         d.ellipse([WIN_W - 50, 9, WIN_W - 42, 17], fill=(235, 70, 60, 255))
         d.text((WIN_W - 56, 7), "LIVE", font=ensb(9), fill=(255, 120, 110, 255), anchor="ra")
@@ -1767,7 +1793,8 @@ def main():
                 # 按下後 4 秒內若狀態沒變且未連線 → 顯示提示(按鈕一定有反應)
                 if ui.get("toggle_at") and not obs_ctl.busy and time.time() - ui["toggle_at"] > 4:
                     if obs_ctl.streaming == ui.get("toggle_was") and not obs_ctl.connected:
-                        ui["toast"] = ("連不到 OBS,請重新點「開始直播（點我）」再試", time.time() + 6)
+                        _dg = getattr(obs_ctl, "diag", "") or "連線中"
+                        ui["toast"] = ("連不到 OBS(%s),請截圖給小編" % _dg, time.time() + 8)
                     ui["toggle_at"] = None
                     ui["dirty"] = True
                 if n == 30:
