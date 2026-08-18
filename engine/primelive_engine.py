@@ -1446,7 +1446,7 @@ def main():
     except Exception as e:
         print("[錯誤] 虛擬攝影機無法啟動: %s" % e)
         cam = _NullCam(args.target_fps)
-        if sys.platform == "darwin":
+        if sys.platform == "darwin" and not args.no_window:   # 無視窗(CI/測試)時不彈對話框、不開系統設定
             # macOS:OBS 虛擬相機系統擴充未啟用/未允許 → 引導使用者到系統設定,程式不崩潰
             try:
                 import subprocess

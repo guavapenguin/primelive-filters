@@ -74,7 +74,7 @@ jobs:
           BIN="$HOME/Desktop/primelive/primelive_filter.app/Contents/MacOS/primelive_filter"
           [ -x "$BIN" ] || BIN="/Volumes/primelive/primelive_filter.app/Contents/MacOS/primelive_filter"
           echo "engine: $BIN"
-          out=$("$BIN" --fake-camera --frames 30 --no-window --preset 2 2>&1); c=$?
+          out=$(perl -e 'alarm 180; exec @ARGV' "$BIN" --fake-camera --frames 30 --no-window --preset 2 2>&1); c=$?
           echo "exit=$c"; echo "$out" | grep -vE "^(W0000|I0000)" | tail -12
           echo "$out" | grep -q "煙霧測試" && echo "PASS: 引擎跑完 30 格" || { echo "FAIL: 引擎沒跑完"; exit 1; }
           echo "$out" | grep -qE "虛擬攝影機已啟動|OBS Virtual Camera" && echo "PASS: 虛擬攝影機" || echo "WARN: 虛擬攝影機未啟(CI 無 OBS vcam 擴充屬正常)"
