@@ -97,12 +97,15 @@ fi
 READY="/tmp/primelive_ready.flag"
 LOGF="$HOME/Library/Logs/primelive_engine.log"
 rm -f "$READY"
-"$ENGINE_BIN" --ready-file "$READY" >>"$LOGF" 2>&1 &
-EPID=$!
+# 用 open -a 以「前景 App」身分啟動:macOS 15 只對前景 App 彈相機授權框,背景 bash 直接叫二進位不會彈
+# (log 由引擎自己寫到 %TEMP%/~/Library/Logs;這裡另存 open 的輸出)
+open -a "$ENGINE" --args --ready-file "$READY" 2>>"$LOGF"
+sleep 2
+EPID=$(pgrep -n -f "primelive_filter.app/Contents/MacOS/primelive_filter" || echo "")
 ok=""
-for i in $(seq 1 80); do
+for i in $(seq 1 160); do          # 最多 80 秒(含使用者按相機授權的時間)
   [ -f "$READY" ] && ok=1 && break
-  if ! kill -0 "$EPID" 2>/dev/null; then break; fi   # 引擎已結束(崩潰)
+  if [ -n "$EPID" ] && ! kill -0 "$EPID" 2>/dev/null; then break; fi   # 引擎已結束(崩潰)
   sleep 0.5
 done
 if [ -z "$ok" ]; then

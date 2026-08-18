@@ -32,8 +32,9 @@ if sys.platform == "win32":
 # --noconsole(視窗模式)打包時 stdout/stderr 是 None,print 會炸 → 導到日誌檔
 if getattr(sys, "frozen", False) and (sys.stdout is None or sys.stderr is None):
     try:
-        _log = open(os.path.join(os.environ.get("TEMP") or __import__("tempfile").gettempdir(), "primelive_engine.log"),
-                    "a", encoding="utf-8", buffering=1)
+        _logdir = (os.path.expanduser("~/Library/Logs") if sys.platform == "darwin"
+                   else (os.environ.get("TEMP") or __import__("tempfile").gettempdir()))
+        _log = open(os.path.join(_logdir, "primelive_engine.log"), "a", encoding="utf-8", buffering=1)
         if sys.stdout is None:
             sys.stdout = _log
         if sys.stderr is None:
@@ -1349,10 +1350,43 @@ def main():
             status = objc.objc_msgSend(AVCaptureDevice, sel, vide)
             print("[mac] 相機權限狀態: %d (0=未決定 1=受限 2=拒絕 3=允許)" % status)
             if status == 0:
-                # requestAccessForMediaType:completionHandler: 需 block;改用開一次 VideoCapture 觸發系統詢問
-                _t = cv2.VideoCapture(0, CAP_BACKEND); time.sleep(1.5); _t.release()
-            elif status == 2:
+                # 用 requestAccessForMediaType:completionHandler: 正式請求(會跳系統詢問框),
+                # 再輪詢狀態最多 60 秒等使用者按「好」;不能只試一次就放棄。
+                try:
+                    Block = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_bool)
+                    _cb = Block(lambda _blk, granted: None)   # 結果靠輪詢讀,回呼不需做事
+                    # ObjC block 結構(簡化):isa, flags, reserved, invoke, descriptor
+                    class _BlockDesc(ctypes.Structure):
+                        _fields_ = [("reserved", ctypes.c_ulong), ("size", ctypes.c_ulong)]
+                    class _BlockLit(ctypes.Structure):
+                        _fields_ = [("isa", ctypes.c_void_p), ("flags", ctypes.c_int), ("reserved", ctypes.c_int),
+                                    ("invoke", ctypes.c_void_p), ("descriptor", ctypes.POINTER(_BlockDesc))]
+                    _desc = _BlockDesc(0, ctypes.sizeof(_BlockLit))
+                    _NSConcreteGlobalBlock = ctypes.c_void_p.in_dll(objc, "_NSConcreteGlobalBlock")
+                    _blk = _BlockLit(ctypes.cast(_NSConcreteGlobalBlock, ctypes.c_void_p), (1 << 28), 0,
+                                     ctypes.cast(_cb, ctypes.c_void_p), ctypes.pointer(_desc))
+                    req = objc.sel_registerName(b"requestAccessForMediaType:completionHandler:")
+                    objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+                    objc.objc_msgSend(AVCaptureDevice, req, vide, ctypes.byref(_blk))
+                    objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+                except Exception as _e:
+                    print("[note] requestAccess 呼叫失敗(%s),改用開鏡頭觸發" % type(_e).__name__)
+                    _t = cv2.VideoCapture(0, CAP_BACKEND); time.sleep(1.0); _t.release()
+                print("[mac] 等待相機授權(系統會跳出詢問,請按「好」)...")
+                for _i in range(120):                     # 最多 60 秒
+                    time.sleep(0.5)
+                    status = objc.objc_msgSend(AVCaptureDevice, sel, vide)
+                    if status in (2, 3):
+                        break
+                print("[mac] 相機權限狀態(等待後): %d" % status)
+            if status == 2:
                 print("[錯誤] 相機權限被拒。請到 系統設定→隱私權與安全性→相機 開啟 primelive_filter。")
+                if not args.no_window:
+                    try:
+                        import subprocess
+                        subprocess.Popen(["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera"])
+                    except Exception:
+                        pass
         except Exception as e:
             print("[note] 相機權限檢查略過: %s" % type(e).__name__)
 
