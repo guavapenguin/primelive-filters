@@ -60,13 +60,8 @@ foreach ($base in $obsBases) {
     }
 }
 
-# ---- 4. 移除舊 primelive 引擎程式檔(安裝器會重放)----
-foreach ($ed in @("$pf\primelive-filter", "F:\primelive-filter")) {
-    if (Test-Path (Join-Path $ed "primelive_filter.exe")) {
-        Get-ChildItem $ed -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -like "primelive_filter*" } |
-            ForEach-Object { try { Remove-Item $_.FullName -Force -ErrorAction Stop } catch {} }
-    }
-}
+# ---- 4.(不動引擎)----
+#  引擎由 installer [Files] ignoreversion 覆蓋更新,不需先移除。
+#  先移除反而會在「重灌失敗時」害引擎消失→「引擎安裝未完成」,故不清引擎。
 
 Note "清理完成。"
