@@ -6,7 +6,7 @@
 [CmdletBinding()]
 param(
     # 推流伺服器(平台URL)。第一階段=自訂RTMP網頁版；日後改用 Amazon IVS 改 -ServiceType ivs
-    [string]$Server = "rtmp://ingest.primestage.live:1935/live",
+    [string]$Server = "rtmps://af36b0817398.global-contribute.live-video.net:443/app/",
 
     # 串流金鑰。留空 = 執行時跳視窗問一次
     [string]$Key = "",
@@ -361,5 +361,5 @@ $camStep
 # 設定版本戳記(golive 靠它判斷升級後要不要刷新設定)
 $psDir = Join-Path $env:APPDATA "PrimeStage"
 New-Item -ItemType Directory -Force -Path $psDir | Out-Null
-Set-Content -Path (Join-Path $psDir "config_ver.txt") -Value "8" -Encoding Ascii -NoNewline
+Set-Content -Path (Join-Path $psDir "config_ver.txt") -Value "9" -Encoding Ascii -NoNewline
 Write-Host "=== 完成 ===" -ForegroundColor Green

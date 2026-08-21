@@ -69,7 +69,7 @@ if [ -f "$SVC" ]; then
   KEY_SET=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['settings'].get('key',''))" "$SVC" 2>/dev/null || \
             /usr/bin/plutil -extract settings.key raw -o - "$SVC" 2>/dev/null || echo "")
 fi
-CONFIG_VER="8"
+CONFIG_VER="9"
 VER_FILE="$PS_DIR/config_ver.txt"
 CUR_VER=""; [ -f "$VER_FILE" ] && CUR_VER=$(tr -d '[:space:]' < "$VER_FILE")
 if [ -z "$KEY_SET" ] || [ "${1:-}" = "--setup" ]; then

@@ -778,7 +778,7 @@ class ObsControl:
         """即時把新金鑰推給 OBS(SetStreamServiceSettings),免重開 OBS。連不上就算了(service.json 已寫,下次啟動生效)。"""
         def run():
             try:
-                server = "rtmp://ingest.primestage.live:1935/live"
+                server = "rtmps://af36b0817398.global-contribute.live-video.net:443/app/"
                 try:    # 用 service.json 現有 server(廠商換正式位址也跟著對)
                     sd = json.load(open(_obs_profile_service_path(), encoding="utf-8"))
                     server = sd.get("settings", {}).get("server", server)

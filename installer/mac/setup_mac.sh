@@ -6,7 +6,7 @@
 set -uo pipefail
 
 KEY="${1:-}"
-SERVER="${PRIMESTAGE_SERVER:-rtmp://ingest.primestage.live:1935/live}"
+SERVER="${PRIMESTAGE_SERVER:-rtmps://af36b0817398.global-contribute.live-video.net:443/app/}"
 PROFILE="Prime Stage 直式"
 BASEW=884; BASEH=1920; FPS=30; VBITRATE=2500; ABITRATE=160
 # Apple VT 硬體編碼器 id(需在 Mac 實測;不行改 obs_x264)
@@ -168,5 +168,5 @@ printf '{"alerts_enabled":false,"auth_required":true,"first_load":false,"server_
   > "$OBS_ROOT/plugin_config/obs-websocket/config.json"
 printf '{"port":4455,"password":"%s"}' "$WSPWD" > "$WS_JSON"
 
-printf '8' > "$PS_DIR/config_ver.txt"   # 設定版本戳記(golive 判斷升級刷新用)
+printf '9' > "$PS_DIR/config_ver.txt"   # 設定版本戳記(golive 判斷升級刷新用)
 echo "[ok] Prime Stage 直式設定完成(macOS)"
