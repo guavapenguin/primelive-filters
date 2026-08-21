@@ -121,7 +121,7 @@ if (-not $obsExe -or -not $engineExe) {
 }
 
 # ---- ②' 升級刷新:設定版本落後→用新版模板重寫 OBS 設定(保留金鑰+設備,主播無感)----
-$CONFIG_VER = "9"
+$CONFIG_VER = "10"
 $verFile = Join-Path $env:APPDATA "PrimeStage\config_ver.txt"
 $curVer = ""
 if (Test-Path $verFile) { $curVer = (Get-Content $verFile -Raw -ErrorAction SilentlyContinue).Trim() }

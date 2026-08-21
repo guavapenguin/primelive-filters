@@ -35,8 +35,8 @@ $ErrorActionPreference = "Stop"
 $ProfileName = "Prime Stage 直式"
 $SceneName   = "Prime Stage 直式"
 # 直式解析度：手冊寫 886x1920，但 OBS 會把輸出寬度對齊到 4 的倍數(886→884)，
-# 故用 884x1920(寬度可被 4 整除)讓 base=output、不產生縮放，畫面與 886 幾乎無差。
-$BaseW = 884; $BaseH = 1920; $FPS = 30; $VBitrate = 2500; $ABitrate = 160
+# 平台上限 720p→用 720x1280(標準 9:16 直式,超過會被踢流)，畫面與 886 幾乎無差。
+$BaseW = 720; $BaseH = 1280; $FPS = 30; $VBitrate = 2500; $ABitrate = 160
 
 # ---- 小工具 -----------------------------------------------------------------
 Add-Type -AssemblyName Microsoft.VisualBasic  -ErrorAction SilentlyContinue
@@ -361,5 +361,5 @@ $camStep
 # 設定版本戳記(golive 靠它判斷升級後要不要刷新設定)
 $psDir = Join-Path $env:APPDATA "PrimeStage"
 New-Item -ItemType Directory -Force -Path $psDir | Out-Null
-Set-Content -Path (Join-Path $psDir "config_ver.txt") -Value "9" -Encoding Ascii -NoNewline
+Set-Content -Path (Join-Path $psDir "config_ver.txt") -Value "10" -Encoding Ascii -NoNewline
 Write-Host "=== 完成 ===" -ForegroundColor Green

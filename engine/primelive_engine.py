@@ -982,9 +982,9 @@ def build_strip_view(presets, thumbs, active, scroll, tw, th, status, demo_label
     return bgr, rects, max_scroll, H
 
 
-# 直播固定直式:攝影機一進管線就中央裁成 OBS 畫布比例(884:1920)。
+# 直播固定直式:攝影機一進管線就中央裁成 OBS 畫布比例(720:1920)。
 # 之後預覽/虛擬攝影機/OBS 全鏈路只有直式,且處理像素變少(防lag加分)。
-CANVAS_AR = 884.0 / 1920.0
+CANVAS_AR = 720.0 / 1280.0
 
 def crop_portrait(frame):
     if frame is None:

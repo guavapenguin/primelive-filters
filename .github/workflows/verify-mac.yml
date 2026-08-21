@@ -127,7 +127,7 @@ jobs:
           print("PROFILE:", p); assert p == "Prime Stage 直式", "profile 不對"
           v = rpc("GetVideoSettings")["responseData"]
           print("CANVAS:", v.get("baseWidth"), "x", v.get("baseHeight"))
-          assert v.get("baseWidth") == 884 and v.get("baseHeight") == 1920, "畫布不是直式"
+          assert v.get("baseWidth") == 720 and v.get("baseHeight") == 1280, "畫布不是直式"
           print("PASS: WebSocket 認證+profile+直式畫布 全通")
           PY
 
