@@ -801,19 +801,27 @@ class ObsControl:
         threading.Thread(target=run, daemon=True).start()
 
     def set_stream_key_async(self, key):
-        """即時把新金鑰推給 OBS(SetStreamServiceSettings),免重開 OBS。連不上就算了(service.json 已寫,下次啟動生效)。"""
+        """換金鑰後:即時把 service.json 的位址+新金鑰推給 OBS,免重開。"""
+        self._push_service_async(key=key)
+
+    def set_stream_url_async(self, url):
+        """換推流位址後:即時把新位址+現有金鑰推給 OBS,免重開。"""
+        self._push_service_async(server=url)
+
+    def _push_service_async(self, server=None, key=None):
         def run():
             try:
-                server = "rtmps://af36b0817398.global-contribute.live-video.net:443/app/"
-                try:    # 用 service.json 現有 server(廠商換正式位址也跟著對)
-                    sd = json.load(open(_obs_profile_service_path(), encoding="utf-8"))
-                    server = sd.get("settings", {}).get("server", server)
+                sd = {}
+                try:
+                    sd = json.load(open(_obs_profile_service_path(), encoding="utf-8")).get("settings", {})
                 except Exception:
                     pass
+                srv = server if server is not None else sd.get("server", "")
+                k = key if key is not None else sd.get("key", "")
                 self._rpc("SetStreamServiceSettings", {
                     "streamServiceType": "rtmp_custom",
                     "streamServiceSettings": {
-                        "server": server, "key": key, "use_auth": False, "bwtest": False}})
+                        "server": srv, "key": k, "use_auth": False, "bwtest": False}})
                 self.connected = True
             except Exception:
                 self.connected = False
@@ -1252,29 +1260,74 @@ def _write_stream_key(key):
         print("[key] 寫入失敗: %s" % e)
         return False
 
+def _current_stream_url():
+    try:
+        d = json.load(open(_obs_profile_service_path(), encoding="utf-8"))
+        return d.get("settings", {}).get("server", "")
+    except Exception:
+        return ""
+
+def _prompt_url():
+    """跳輸入框問推流位址(預填目前值);回傳去空白後字串或 ''。"""
+    cur = _current_stream_url()
+    try:
+        import subprocess
+        if sys.platform == "win32":
+            ps = ('Add-Type -AssemblyName Microsoft.VisualBasic;'
+                  '[Microsoft.VisualBasic.Interaction]::InputBox('
+                  '"貼上推流位址(RTMP/RTMPS URL)`n平台後台或廠商提供","primelive 換推流位址","%s")' % cur)
+            out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                                 capture_output=True, text=True, timeout=120)
+            return (out.stdout or "").strip()
+        if sys.platform == "darwin":
+            scr = ('text returned of (display dialog "貼上推流位址(RTMP/RTMPS URL)\\n平台後台或廠商提供"'
+                   ' default answer "%s" with title "primelive 換推流位址")' % cur)
+            out = subprocess.run(["osascript", "-e", scr], capture_output=True, text=True, timeout=120)
+            return (out.stdout or "").strip()
+    except Exception:
+        pass
+    return ""
+
+def _write_stream_url(url):
+    """把推流位址寫進 service.json(保留金鑰)。"""
+    try:
+        p = _obs_profile_service_path()
+        d = json.load(open(p, encoding="utf-8")) if os.path.exists(p) else {"type": "rtmp_custom", "settings": {}}
+        d.setdefault("settings", {})["server"] = url
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False)
+        return True
+    except Exception as e:
+        print("[url] 寫入失敗: %s" % e)
+        return False
+
 def build_settings_panel(cam_name):
-    """設定選單:切換鏡頭 / 換金鑰。回傳 (RGBA, {item:rect(相對面板)}, 面板位置(x,y))。"""
-    PW_, PH_ = WIN_W - 60, 232
-    px, py = 30, 180
+    """設定選單:切換鏡頭 / 換金鑰 / 換推流位址。回傳 (RGBA, {item:rect(相對面板)}, 面板位置(x,y))。"""
+    PW_, PH_ = WIN_W - 60, 286
+    px, py = 30, 150
     im = PILImage.new("RGBA", (PW_, PH_), (0, 0, 0, 0))
     d = PILDraw.Draw(im)
     d.rounded_rectangle([0, 0, PW_ - 1, PH_ - 1], radius=18, fill=(24, 24, 32, 245), outline=(80, 84, 96, 255), width=2)
     zhb = lambda s: _uifont("zhb", s); zh = lambda s: _uifont("zh", s)
-    d.text((PW_ // 2, 24), "設定", font=zhb(18), fill=(240, 200, 120, 255), anchor="mm")
+    d.text((PW_ // 2, 22), "設定", font=zhb(18), fill=(240, 200, 120, 255), anchor="mm")
     rects = {}
     # 切換鏡頭
-    d.rounded_rectangle([20, 52, PW_ - 20, 104], radius=12, fill=(58, 62, 74, 255))
-    d.text((PW_ // 2, 70), "切換鏡頭", font=zhb(16), fill=(255, 255, 255, 255), anchor="mm")
-    d.text((PW_ // 2, 90), "目前：" + (cam_name or "—"), font=zh(11), fill=(190, 195, 205, 255), anchor="mm")
-    rects["cam"] = (20, 52, PW_ - 20, 104)
+    d.rounded_rectangle([20, 46, PW_ - 20, 96], radius=12, fill=(58, 62, 74, 255))
+    d.text((PW_ // 2, 62), "切換鏡頭", font=zhb(16), fill=(255, 255, 255, 255), anchor="mm")
+    d.text((PW_ // 2, 82), "目前：" + (cam_name or "—"), font=zh(11), fill=(190, 195, 205, 255), anchor="mm")
+    rects["cam"] = (20, 46, PW_ - 20, 96)
     # 換金鑰
-    d.rounded_rectangle([20, 116, PW_ - 20, 156], radius=12, fill=(58, 62, 74, 255))
-    d.text((PW_ // 2, 136), "換直播金鑰", font=zhb(16), fill=(255, 255, 255, 255), anchor="mm")
-    rects["key"] = (20, 116, PW_ - 20, 156)
+    d.rounded_rectangle([20, 106, PW_ - 20, 146], radius=12, fill=(58, 62, 74, 255))
+    d.text((PW_ // 2, 126), "換直播金鑰", font=zhb(16), fill=(255, 255, 255, 255), anchor="mm")
+    rects["key"] = (20, 106, PW_ - 20, 146)
+    # 換推流位址
+    d.rounded_rectangle([20, 156, PW_ - 20, 196], radius=12, fill=(58, 62, 74, 255))
+    d.text((PW_ // 2, 176), "換推流位址", font=zhb(16), fill=(255, 255, 255, 255), anchor="mm")
+    rects["url"] = (20, 156, PW_ - 20, 196)
     # 關閉
-    d.rounded_rectangle([20, 172, PW_ - 20, 210], radius=12, fill=(44, 46, 56, 255))
-    d.text((PW_ // 2, 191), "關閉", font=zhb(15), fill=(220, 222, 228, 255), anchor="mm")
-    rects["close"] = (20, 172, PW_ - 20, 210)
+    d.rounded_rectangle([20, 210, PW_ - 20, 250], radius=12, fill=(44, 46, 56, 255))
+    d.text((PW_ // 2, 230), "關閉", font=zhb(15), fill=(220, 222, 228, 255), anchor="mm")
+    rects["close"] = (20, 210, PW_ - 20, 250)
     return _rgba(im), rects, (px, py)
 
 def build_tray(presets, thumbs, active, scroll, tw, th):
@@ -1814,7 +1867,7 @@ def main():
           "chip_rect": (WIN_W - 150, 34, WIN_W - 10, 66),
           "close_rect": (WIN_W - 38, 6, WIN_W - 8, 32), "quit": False,
           "set_rect": (WIN_W - 120, 6, WIN_W - 46, 30), "settings_open": False,
-          "cur_cam": args.camera, "do_cam_switch": False, "do_key_change": False}
+          "cur_cam": args.camera, "do_cam_switch": False, "do_key_change": False, "do_url_change": False}
     strip_tw = TRAY_TW
     demo_imgs = {}
     for g, fn in (("f", "demo_female.png"), ("m", "demo_male.png")):
@@ -1856,6 +1909,7 @@ def main():
                             if px + rx0 <= x <= px + rx1 and py + ry0 <= y <= py + ry1:
                                 if k == "cam":   ui["do_cam_switch"] = True
                                 elif k == "key": ui["do_key_change"] = True
+                                elif k == "url": ui["do_url_change"] = True
                                 ui["settings_open"] = False; ui["dirty"] = True
                                 break
                         else:
@@ -2041,6 +2095,16 @@ def main():
                             ui["toast"] = ("金鑰已更新", time.time() + 4)
                         else:
                             ui["toast"] = ("金鑰寫入失敗", time.time() + 5)
+                    ui["dirty"] = True
+                if ui.get("do_url_change"):
+                    ui["do_url_change"] = False
+                    newurl = _prompt_url()
+                    if newurl:
+                        if _write_stream_url(newurl):
+                            obs_ctl.set_stream_url_async(newurl)
+                            ui["toast"] = ("推流位址已更新", time.time() + 4)
+                        else:
+                            ui["toast"] = ("位址寫入失敗", time.time() + 5)
                     ui["dirty"] = True
                 if ui.get("live_toggle"):
                     ui["live_toggle"] = False
