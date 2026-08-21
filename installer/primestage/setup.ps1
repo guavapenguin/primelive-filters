@@ -88,7 +88,11 @@ $svcPath = Join-Path $obsRoot "basic\profiles\$ProfileName\service.json"
 if (Test-Path $svcPath) {
     try { $oldKey = (Get-Content $svcPath -Raw -Encoding UTF8 | ConvertFrom-Json).settings.key } catch {}
 }
-if (-not $Key) { $Key = $oldKey }                 # 已有金鑰(升級)→直接沿用
+if (-not $oldKey) {   # 後備:清理流程備份的金鑰(清掉 OBS profile 後仍保留)
+    $savedKey = Join-Path $env:APPDATA "PrimeStage\saved_key.txt"
+    if (Test-Path $savedKey) { try { $oldKey = (Get-Content $savedKey -Raw).Trim() } catch {} }
+}
+if (-not $Key) { $Key = $oldKey }                 # 已有金鑰(升級/清裝)→直接沿用
 if (-not $Key) {
     $Key = Ask-Box "請貼上你的『串流金鑰』`n(直播主後台 → 設定 → OBS平台金鑰 → 複製)`n`n只會存在你這台電腦、不會外傳。" "Prime Stage 一鍵設定 - 貼上金鑰"
 }

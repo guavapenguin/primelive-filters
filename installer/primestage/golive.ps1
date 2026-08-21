@@ -95,6 +95,12 @@ if (-not $obsExe -or -not $engineExe) {
             Die "安裝檔下載失敗。請檢查網路後重試,或向小編索取安裝檔放到本資料夾再執行。"
         }
     }
+    # 先徹底清除舊 OBS/引擎殘骸(卡住的虛擬相機 DLL 會擋住 OBS 重裝)
+    $cleanup = Join-Path $here "cleanup_old.ps1"
+    if (Test-Path $cleanup) {
+        Note "清除舊版殘骸(保留你的金鑰與設備)..."
+        try { & $cleanup } catch {}
+    }
     Note "安裝 OBS + 濾鏡引擎..."
     Show-Progress "正在安裝 OBS 與濾鏡引擎(約 2~3 分鐘)，權限視窗請按「是」…"
     try {
@@ -106,8 +112,11 @@ if (-not $obsExe -or -not $engineExe) {
     }
     Hide-Progress
     $obsExe = Find-Obs; $engineExe = Find-Engine
-    if (-not $obsExe)    { Die "OBS 安裝未完成,請重新執行本檔一次。" }
-    if (-not $engineExe) { Die "濾鏡引擎安裝未完成,請重新執行本檔一次。" }
+    if (-not $obsExe) {
+        # 多半是舊 OBS 檔案被鎖住、需重開機才能清乾淨 → 明確引導,別讓主播無限重試
+        Die "OBS 需要重新開機才能完成安裝。`n`n請「重新開機」後,再點一次桌面的『primelive 一鍵開播』即可。"
+    }
+    if (-not $engineExe) { Die "濾鏡引擎安裝未完成,請重新開機後再點一次桌面捷徑。" }
     Note "安裝完成。"
 }
 

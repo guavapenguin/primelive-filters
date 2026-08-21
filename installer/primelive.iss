@@ -26,6 +26,7 @@ Source: "f:\mcp\primelive\obs\engine\dist\primelive_filter\*"; DestDir: "{app}";
 Source: "f:\mcp\primelive\obs\installer\primestage\golive.ps1"; DestDir: "{app}\primestage"; Flags: ignoreversion
 Source: "f:\mcp\primelive\obs\installer\primestage\devices.ps1"; DestDir: "{app}\primestage"; Flags: ignoreversion
 Source: "f:\mcp\primelive\obs\installer\primestage\setup.ps1"; DestDir: "{app}\primestage"; Flags: ignoreversion
+Source: "f:\mcp\primelive\obs\installer\primestage\cleanup_old.ps1"; DestDir: "{app}\primestage"; Flags: ignoreversion
 ; 使用說明
 Source: "f:\mcp\primelive\obs\installer\使用說明.txt"; DestDir: "{app}"; Flags: ignoreversion
 ; OBS 安裝檔（含虛擬攝影機；裝完自動刪）
@@ -40,7 +41,17 @@ Name: "{group}\使用說明"; Filename: "{app}\使用說明.txt"
 Name: "{group}\移除 primelive 濾鏡"; Filename: "{uninstallexe}"
 
 [Run]
-; 先靜默安裝 OBS（會註冊「OBS Virtual Camera」虛擬攝影機，引擎需要它）
-Filename: "{tmp}\OBS-Studio-Installer.exe"; Parameters: "/S"; StatusMsg: "正在安裝 OBS（含虛擬攝影機，請稍候約 1 分鐘）…"; Flags: waituntilterminated
+; ① 先徹底清除舊的 OBS/引擎殘骸(卡住的虛擬相機 DLL、半殘資料夾),保留金鑰/設備
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\primestage\cleanup_old.ps1"""; StatusMsg: "正在清除舊版殘骸…"; Flags: waituntilterminated runhidden
+; ② 靜默安裝 OBS（僅在缺 OBS 時；健康的 OBS 不重裝，避免相機被佔用時弄壞）
+Filename: "{tmp}\OBS-Studio-Installer.exe"; Parameters: "/S"; StatusMsg: "正在安裝 OBS（含虛擬攝影機，請稍候約 1 分鐘）…"; Flags: waituntilterminated; Check: NeedInstallObs
 ; 裝完直接進入一鍵開播（首次會問攝影機/麥克風與串流金鑰）
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\primestage\golive.ps1"""; Description: "立即開播（第一次會先選設備、貼串流金鑰）"; Flags: postinstall nowait skipifsilent
+
+[Code]
+// 只有在缺 OBS(找不到 obs64.exe)時才裝 OBS;健康的 OBS 不重裝
+function NeedInstallObs(): Boolean;
+begin
+  Result := (not FileExists(ExpandConstant('{commonpf}\obs-studio\bin\64bit\obs64.exe')))
+        and (not FileExists(ExpandConstant('{commonpf32}\obs-studio\bin\64bit\obs64.exe')));
+end;
