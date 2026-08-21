@@ -340,6 +340,27 @@ try {
     Write-IniFile $gIni $raw
 } catch {}
 
+# OBS 縮到系統匣(讓 --minimize-to-tray 真的把 OBS 藏起來,主播只看 primelive)
+try {
+    foreach ($iniName in @("user.ini", "global.ini")) {
+        $ini = Join-Path $obsRoot $iniName
+        if (-not (Test-Path $ini)) { continue }
+        $raw = [System.IO.File]::ReadAllText($ini)
+        $bw = "[BasicWindow]`r`nSysTrayEnabled=true`r`nSysTrayWhenStarted=true`r`nSysTrayMinimizeToTray=true`r`nMinimizeToTray=true"
+        if ($raw -match "(?ms)^\[BasicWindow\].*?(?=^\[|\z)") {
+            $add = ""
+            foreach ($kv in @("SysTrayEnabled=true","SysTrayWhenStarted=true","SysTrayMinimizeToTray=true","MinimizeToTray=true")) {
+                $k = ($kv -split "=")[0]
+                if ($raw -notmatch "(?m)^$k=") { $add += "$kv`r`n" }
+            }
+            if ($add) { $raw = $raw -replace "(?m)^\[BasicWindow\]", "[BasicWindow]`r`n$add".TrimEnd() }
+        } else {
+            $raw = $raw.TrimEnd() + "`r`n`r`n$bw`r`n"
+        }
+        Write-IniFile $ini $raw
+    }
+} catch {}
+
 # ---- 8. 完成 ----------------------------------------------------------------
 $keyState = if ($Key) { "已寫入你的金鑰" } else { "尚未填金鑰(記得到 OBS 設定→直播 貼上)" }
 $camStep = if ($Camera -eq "primelive") {

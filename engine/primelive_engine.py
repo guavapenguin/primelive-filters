@@ -660,11 +660,36 @@ class ObsControl:
                 rd = d.get("responseData") or {}
                 self.streaming = bool(rd.get("outputActive", not self.streaming))
                 self.connected = True
+                time.sleep(0.5); self.hide_obs_window()   # 推流時 OBS 可能跳出→再藏
             except Exception:
                 self.connected = False
             finally:
                 self.busy = False
         threading.Thread(target=run, daemon=True).start()
+
+    @staticmethod
+    def hide_obs_window():
+        """Windows:把 OBS 主視窗藏起來(主播只看 primelive,不看 OBS)。mac 靠 --minimize-to-tray。"""
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            u = ctypes.windll.user32
+            SW_HIDE = 0
+            EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+            def _cb(hwnd, _):
+                buf = ctypes.create_unicode_buffer(256)
+                u.GetWindowTextW(hwnd, buf, 256)
+                cls = ctypes.create_unicode_buffer(256)
+                u.GetClassNameW(hwnd, cls, 256)
+                t = buf.value.lower()
+                # 藏所有 OBS 相關視窗(主視窗+當機/安全模式對話框);排除 primelive 與 OBSBOT
+                if "obs" in t and "primelive" not in t and "obsbot" not in t:
+                    u.ShowWindow(hwnd, SW_HIDE)
+                return True
+            u.EnumWindows(EnumWindowsProc(_cb), 0)
+        except Exception:
+            pass
 
     def ensure_obs_async(self):
         """背景:OBS 沒在跑或埠沒開→引擎自己把 OBS 帶起來(帶 websocket 參數),輪詢到通;
@@ -693,7 +718,7 @@ class ObsControl:
                     print("[obs] 清 sentinel 失敗: %s" % _e)
             try:
                 if port_open():
-                    self.connected = True; return
+                    self.connected = True; self.hide_obs_window(); return
                 self.diag = ""
                 if sys.platform == "darwin":
                     running = subprocess.run(["pgrep", "-x", "OBS"], capture_output=True).returncode == 0
@@ -751,6 +776,7 @@ class ObsControl:
                     time.sleep(1)
                     if port_open():
                         self.connected = True
+                        time.sleep(1.5); self.hide_obs_window()   # 給 OBS 畫完視窗再藏
                         print("[obs] websocket 已連通")
                         return
                 # 診斷
@@ -803,6 +829,7 @@ class ObsControl:
                 rd = d.get("responseData") or {}
                 self.streaming = bool(rd.get("outputActive"))
                 self.connected = True
+                self.hide_obs_window()   # 定期確保 OBS 藏著(每~8秒 poll 一次)
             except Exception:
                 self.connected = False
             finally:
