@@ -1559,6 +1559,13 @@ def main():
     ap.add_argument("--no-adaptive", action="store_true", help="關閉自動調解析度（維持固定畫質）")
     ap.add_argument("--no-threaded", action="store_true", help="關閉背景抓圖執行緒（除錯用）")
     ap.add_argument("--gpu", action="store_true", help="嘗試用 GPU 跑 MediaPipe（失敗自動退回 CPU）")
+    # 水平翻轉「送出去」的畫面：校正相機自帶的鏡像，讓觀眾看到正常（非鏡像）畫面。
+    # 只翻輸出（虛擬攝影機），主播自己的預覽維持不變（仍是自拍鏡像、較自然）。預設開；
+    # 若某台相機本來就非鏡像（觀眾端反而變反），改帶 --no-flip-output 關閉。
+    ap.add_argument("--flip-output", dest="flip_output", action="store_true", default=True,
+                    help="水平翻轉輸出畫面以校正相機鏡像（預設開）")
+    ap.add_argument("--no-flip-output", dest="flip_output", action="store_false",
+                    help="關閉輸出翻轉（相機本來就非鏡像時用）")
     ap.add_argument("--ready-file", default="", help="虛擬攝影機啟動後寫一個旗標檔（給一鍵開播腳本判斷可以開 OBS 了）")
     ap.add_argument("--fake-camera", action="store_true",
                     help="測試用:沒有實體鏡頭時,用內建示範圖當攝影機來源(CI 驗證整條管線)")
@@ -2037,7 +2044,8 @@ def main():
                 n += 1
 
             if last_full is not None:
-                cam.send(last_full)
+                # 只翻「送出去」的畫面（校正相機鏡像→觀眾看到正常）；預覽用未翻轉的 last_full 維持自拍視角
+                cam.send(cv2.flip(last_full, 1) if args.flip_output else last_full)
             cam.sleep_until_next_frame()
 
             if not args.no_window:

@@ -86,6 +86,12 @@ cat > "$SCENES_DIR/$PROFILE.json" <<EOF
     "prev_ver": 536936450, "name": "麥克風", "uuid": "a1b2c3d4-0004-4000-8000-primestagem01",
     "id": "coreaudio_input_capture", "versioned_id": "coreaudio_input_capture",
     "settings": { "device_id": "default" },
+    "filters": [
+      { "prev_ver": 536936450, "name": "噪音抑制(RNNoise)", "uuid": "a1b2c3d4-0f01-4000-8000-000000000f01", "id": "noise_suppress_filter_v2", "versioned_id": "noise_suppress_filter_v2", "settings": { "method": "rnnoise" }, "enabled": true, "hotkeys": {} },
+      { "prev_ver": 536936450, "name": "噪音門(擋呼吸/雜音)", "uuid": "a1b2c3d4-0f02-4000-8000-000000000f02", "id": "noise_gate_filter", "versioned_id": "noise_gate_filter", "settings": { "open_threshold": -30.0, "close_threshold": -40.0, "attack_time": 10, "hold_time": 200, "release_time": 150 }, "enabled": true, "hotkeys": {} },
+      { "prev_ver": 536936450, "name": "壓縮器(音量平穩)", "uuid": "a1b2c3d4-0f03-4000-8000-000000000f03", "id": "compressor_filter", "versioned_id": "compressor_filter", "settings": { "ratio": 3.0, "threshold": -18.0, "attack_time": 6, "release_time": 60, "output_gain": 4.0, "sidechain_source": "none" }, "enabled": true, "hotkeys": {} },
+      { "prev_ver": 536936450, "name": "限幅器(防爆音)", "uuid": "a1b2c3d4-0f04-4000-8000-000000000f04", "id": "limiter_filter", "versioned_id": "limiter_filter", "settings": { "threshold": -3.0, "release_time": 60 }, "enabled": true, "hotkeys": {} }
+    ],
     "mixers": 255, "sync": 0, "flags": 0, "volume": 1.0, "balance": 0.5, "enabled": true, "muted": false,
     "push-to-mute": false, "push-to-mute-delay": 0, "push-to-talk": false, "push-to-talk-delay": 0,
     "hotkeys": {}, "deinterlace_mode": 0, "deinterlace_field_order": 0, "monitoring_type": 0, "private_settings": {}
@@ -168,5 +174,5 @@ printf '{"alerts_enabled":false,"auth_required":true,"first_load":false,"server_
   > "$OBS_ROOT/plugin_config/obs-websocket/config.json"
 printf '{"port":4455,"password":"%s"}' "$WSPWD" > "$WS_JSON"
 
-printf '10' > "$PS_DIR/config_ver.txt"   # 設定版本戳記(golive 判斷升級刷新用)
+printf '11' > "$PS_DIR/config_ver.txt"   # 設定版本戳記(golive 判斷升級刷新用)
 echo "[ok] Prime Stage 直式設定完成(macOS)"

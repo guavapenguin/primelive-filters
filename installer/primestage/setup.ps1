@@ -212,11 +212,14 @@ $sceneJson = @"
 {
   "name": "$SceneName",
   "DesktopAudioDevice1": {
-    "prev_ver": 536936450, "name": "輸出音效 1",
+    "prev_ver": 536936450, "name": "背景音樂/電腦聲音",
     "uuid": "a1b2c3d4-0003-4000-8000-primestageo01",
     "id": "wasapi_output_capture", "versioned_id": "wasapi_output_capture",
     "settings": { "device_id": "default" },
-    "mixers": 255, "sync": 0, "flags": 0, "volume": 1.0, "balance": 0.5,
+    "filters": [
+      { "prev_ver": 536936450, "name": "限幅器(防爆音)", "uuid": "a1b2c3d4-0f05-4000-8000-000000000f05", "id": "limiter_filter", "versioned_id": "limiter_filter", "settings": { "threshold": -6.0, "release_time": 60 }, "enabled": true, "hotkeys": {} }
+    ],
+    "mixers": 255, "sync": 0, "flags": 0, "volume": 0.16, "balance": 0.5,
     "enabled": true, "muted": false,
     "push-to-mute": false, "push-to-mute-delay": 0, "push-to-talk": false, "push-to-talk-delay": 0,
     "hotkeys": { "libobs.mute": [], "libobs.unmute": [], "libobs.push-to-mute": [], "libobs.push-to-talk": [] },
@@ -227,6 +230,12 @@ $sceneJson = @"
     "uuid": "a1b2c3d4-0004-4000-8000-primestagem01",
     "id": "wasapi_input_capture", "versioned_id": "wasapi_input_capture",
     "settings": { "device_id": "$MicIdJson" },
+    "filters": [
+      { "prev_ver": 536936450, "name": "噪音抑制(RNNoise)", "uuid": "a1b2c3d4-0f01-4000-8000-000000000f01", "id": "noise_suppress_filter_v2", "versioned_id": "noise_suppress_filter_v2", "settings": { "method": "rnnoise" }, "enabled": true, "hotkeys": {} },
+      { "prev_ver": 536936450, "name": "噪音門(擋呼吸/雜音)", "uuid": "a1b2c3d4-0f02-4000-8000-000000000f02", "id": "noise_gate_filter", "versioned_id": "noise_gate_filter", "settings": { "open_threshold": -30.0, "close_threshold": -40.0, "attack_time": 10, "hold_time": 200, "release_time": 150 }, "enabled": true, "hotkeys": {} },
+      { "prev_ver": 536936450, "name": "壓縮器(音量平穩)", "uuid": "a1b2c3d4-0f03-4000-8000-000000000f03", "id": "compressor_filter", "versioned_id": "compressor_filter", "settings": { "ratio": 3.0, "threshold": -18.0, "attack_time": 6, "release_time": 60, "output_gain": 4.0, "sidechain_source": "none" }, "enabled": true, "hotkeys": {} },
+      { "prev_ver": 536936450, "name": "限幅器(防爆音)", "uuid": "a1b2c3d4-0f04-4000-8000-000000000f04", "id": "limiter_filter", "versioned_id": "limiter_filter", "settings": { "threshold": -3.0, "release_time": 60 }, "enabled": true, "hotkeys": {} }
+    ],
     "mixers": 255, "sync": 0, "flags": 0, "volume": 1.0, "balance": 0.5,
     "enabled": true, "muted": false,
     "push-to-mute": false, "push-to-mute-delay": 0, "push-to-talk": false, "push-to-talk-delay": 0,
@@ -382,5 +391,5 @@ $camStep
 # 設定版本戳記(golive 靠它判斷升級後要不要刷新設定)
 $psDir = Join-Path $env:APPDATA "PrimeStage"
 New-Item -ItemType Directory -Force -Path $psDir | Out-Null
-Set-Content -Path (Join-Path $psDir "config_ver.txt") -Value "10" -Encoding Ascii -NoNewline
+Set-Content -Path (Join-Path $psDir "config_ver.txt") -Value "11" -Encoding Ascii -NoNewline
 Write-Host "=== 完成 ===" -ForegroundColor Green
