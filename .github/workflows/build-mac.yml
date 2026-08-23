@@ -1,31 +1,41 @@
 name: build-mac
 # 在 GitHub 的 macOS 雲端主機打包 primelive_filter.app + dmg(本地沒有 Mac 也能出貨)
+# target: arm64 = Apple Silicon 原生;x86_64 = Intel(在 arm64 主機用 Rosetta 打包,因 Intel 主機已幾乎排不到)
 # 簽章+公證(讓 Gatekeeper 零警告):設定下列 Secrets 後自動啟用,沒設就出未簽版
-#   MAC_CERT_P12_BASE64  Developer ID Application 憑證(.p12 轉 base64)
-#   MAC_CERT_PASSWORD    .p12 密碼
-#   APPLE_ID             Apple ID 帳號(公證用)
-#   APPLE_APP_PASSWORD   App 專用密碼(appleid.apple.com 產生)
-#   APPLE_TEAM_ID        Team ID(developer.apple.com 帳號頁)
+#   MAC_CERT_P12_BASE64 / MAC_CERT_PASSWORD / APPLE_ID / APPLE_APP_PASSWORD / APPLE_TEAM_ID
 on:
   workflow_dispatch:
     inputs:
-      runner:
-        description: 'macos-14 = Apple Silicon(arm64) / macos-13 = Intel(x86_64)'
-        default: macos-14
+      target:
+        description: 'arm64 = Apple Silicon 原生 / x86_64 = Intel(Rosetta 打包)'
+        default: arm64
         type: string
 
 jobs:
   build:
-    runs-on: ${{ inputs.runner || 'macos-14' }}   # arm64=macos-14 / x86_64=macos-13
+    runs-on: macos-14   # 一律用充足的 Apple Silicon 主機;x86_64 目標改用 Rosetta 打包
     timeout-minutes: 60
     env:
       SIGN: ${{ secrets.MAC_CERT_P12_BASE64 != '' && 'true' || 'false' }}
+      TARGET: ${{ inputs.target || 'arm64' }}
     steps:
       - uses: actions/checkout@v4
 
+      # arm64:用 setup-python 的原生 arm64 python
       - uses: actions/setup-python@v5
+        if: env.TARGET == 'arm64'
         with:
           python-version: '3.12'
+
+      # x86_64:裝 python.org 的 universal2 python + 確保 Rosetta,整個 build 之後在 arch -x86_64 下跑
+      - name: Setup x86_64 Python (Rosetta)
+        if: env.TARGET == 'x86_64'
+        run: |
+          softwareupdate --install-rosetta --agree-to-license || true
+          curl -fsSL -o /tmp/py.pkg https://www.python.org/ftp/python/3.12.8/python-3.12.8-macos11.pkg
+          sudo installer -pkg /tmp/py.pkg -target /
+          echo "PY_X64=/Library/Frameworks/Python.framework/Versions/3.12/bin/python3" >> $GITHUB_ENV
+          arch -x86_64 /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 -c "import platform; print('build python arch:', platform.machine())"
 
       - name: Import Developer ID certificate (if provided)
         if: env.SIGN == 'true'
@@ -47,8 +57,13 @@ jobs:
         env:
           SIGN_IDENTITY: ${{ env.SIGN_IDENTITY }}
         run: |
-          export PYTHON=python3
-          bash installer/mac/build_mac.sh
+          if [ "$TARGET" = "x86_64" ]; then
+            export PYTHON="$PY_X64"
+            arch -x86_64 bash installer/mac/build_mac.sh
+          else
+            export PYTHON=python3
+            bash installer/mac/build_mac.sh
+          fi
 
       - name: Notarize + staple (if signed)
         if: env.SIGN == 'true'
@@ -67,8 +82,8 @@ jobs:
         run: |
           set +e
           BIN="engine/dist/primelive_filter.app/Contents/MacOS/primelive_filter"
-          echo "== deps =="; engine/.venv-mac/bin/pip show mediapipe opencv-python numpy 2>/dev/null | grep -E "^(Name|Version)"
-          out2=$("$BIN" --frames 1 --no-window 2>&1); c2=$?
+          RUN=""; [ "$TARGET" = "x86_64" ] && RUN="arch -x86_64"
+          out2=$($RUN "$BIN" --frames 1 --no-window 2>&1); c2=$?
           echo "== frames1 (exit $c2) =="; echo "$out2" | grep -vE "^(W0000|I0000)" | tail -60
           echo "$out2" | grep -q "找不到可用的攝影機" && echo "BUNDLE-OK" && exit 0
           echo "BUNDLE-FAIL"; exit 1
