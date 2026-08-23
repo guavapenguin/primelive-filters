@@ -619,35 +619,124 @@ class ObsControl:
         except Exception:
             pass
 
-    def _rpc(self, req_type, req_data=None):
+    def _connect(self):
+        """開一條 obs-websocket v5 連線並完成認證,回傳已 Identified 的 ws。"""
         import websocket as _ws
-        import uuid as _uuid
         import hashlib as _hl
         import base64 as _b64
         ws = _ws.create_connection("ws://127.0.0.1:%d" % self.port, timeout=3)
+        hello = json.loads(ws.recv())                           # Hello
+        ident = {"rpcVersion": 1}
+        auth = (hello.get("d") or {}).get("authentication")
+        if auth and self.password:                             # obs-websocket v5 認證
+            sec = _b64.b64encode(_hl.sha256((self.password + auth["salt"]).encode()).digest()).decode()
+            ident["authentication"] = _b64.b64encode(_hl.sha256((sec + auth["challenge"]).encode()).digest()).decode()
+        ws.send(json.dumps({"op": 1, "d": ident}))             # Identify
+        json.loads(ws.recv())                                  # Identified
+        return ws
+
+    @staticmethod
+    def _req(ws, req_type, req_data=None):
+        """在已連線的 ws 上送一個請求並回傳回應(op7 的 d)。"""
+        import uuid as _uuid
+        rid = str(_uuid.uuid4())
+        req = {"requestType": req_type, "requestId": rid}
+        if req_data:
+            req["requestData"] = req_data
+        ws.send(json.dumps({"op": 6, "d": req}))
+        while True:
+            m = json.loads(ws.recv())
+            if m.get("op") == 7 and m["d"].get("requestId") == rid:
+                return m["d"]
+
+    def _rpc(self, req_type, req_data=None):
+        ws = self._connect()
         try:
-            hello = json.loads(ws.recv())                           # Hello
-            ident = {"rpcVersion": 1}
-            auth = (hello.get("d") or {}).get("authentication")
-            if auth and self.password:                              # obs-websocket v5 認證
-                sec = _b64.b64encode(_hl.sha256((self.password + auth["salt"]).encode()).digest()).decode()
-                ident["authentication"] = _b64.b64encode(_hl.sha256((sec + auth["challenge"]).encode()).digest()).decode()
-            ws.send(json.dumps({"op": 1, "d": ident}))              # Identify
-            json.loads(ws.recv())                                   # Identified
-            rid = str(_uuid.uuid4())
-            req = {"requestType": req_type, "requestId": rid}
-            if req_data:
-                req["requestData"] = req_data
-            ws.send(json.dumps({"op": 6, "d": req}))
-            while True:
-                m = json.loads(ws.recv())
-                if m.get("op") == 7 and m["d"].get("requestId") == rid:
-                    return m["d"]
+            return self._req(ws, req_type, req_data)
         finally:
             try:
                 ws.close()
             except Exception:
                 pass
+
+    # ---- 音訊自助調整(給設定面板) ----
+    _AUDIO_IN_KINDS  = ("wasapi_input_capture", "coreaudio_input_capture", "pulse_input_capture")
+    _AUDIO_OUT_KINDS = ("wasapi_output_capture", "coreaudio_output_capture", "pulse_output_capture")
+
+    def _find_audio_inputs(self, ws):
+        """依 inputKind 找出麥克風/桌面音效的來源名稱(跨語系/跨平台,不靠寫死名字)。"""
+        d = self._req(ws, "GetInputList")
+        mic = desk = None
+        for it in (d.get("responseData") or {}).get("inputs", []):
+            k = (it.get("inputKind", "") or "") + " " + (it.get("unversionedInputKind", "") or "")
+            n = it.get("inputName", "")
+            if any(x in k for x in self._AUDIO_IN_KINDS) and mic is None:
+                mic = n
+            elif any(x in k for x in self._AUDIO_OUT_KINDS) and desk is None:
+                desk = n
+        return mic, desk
+
+    def read_audio_state(self):
+        """一次連線讀回:麥克風/桌面音效名稱、音量(dB)、桌面是否靜音、麥克風可選裝置清單+目前裝置名。"""
+        st = {"ok": False, "mic": None, "desk": None, "mic_db": 0.0, "desk_db": 0.0,
+              "desk_muted": False, "mic_devices": [], "mic_dev_name": ""}
+        try:
+            ws = self._connect()
+            try:
+                mic, desk = self._find_audio_inputs(ws)
+                st["mic"], st["desk"] = mic, desk
+                if mic:
+                    v = (self._req(ws, "GetInputVolume", {"inputName": mic}).get("responseData") or {})
+                    st["mic_db"] = float(v.get("inputVolumeDb", 0.0))
+                    try:
+                        items = ((self._req(ws, "GetInputPropertiesListPropertyItems",
+                                            {"inputName": mic, "propertyName": "device_id"}).get("responseData") or {})
+                                 .get("propertyItems", []))
+                        st["mic_devices"] = [(it.get("itemName", ""), it.get("itemValue", ""))
+                                             for it in items if it.get("itemEnabled", True) and it.get("itemName")]
+                        cur = ((self._req(ws, "GetInputSettings", {"inputName": mic}).get("responseData") or {})
+                               .get("inputSettings", {}).get("device_id", ""))
+                        nm = next((n for (n, val) in st["mic_devices"] if val == cur), "")
+                        st["mic_dev_name"] = nm or ("系統預設" if cur in ("", "default") else cur)
+                    except Exception:
+                        pass
+                if desk:
+                    v = (self._req(ws, "GetInputVolume", {"inputName": desk}).get("responseData") or {})
+                    st["desk_db"] = float(v.get("inputVolumeDb", 0.0))
+                    m = (self._req(ws, "GetInputMute", {"inputName": desk}).get("responseData") or {})
+                    st["desk_muted"] = bool(m.get("inputMuted", False))
+                st["ok"] = True
+            finally:
+                try: ws.close()
+                except Exception: pass
+        except Exception as e:
+            st["err"] = str(e)
+        return st
+
+    def set_volume_async(self, input_name, db):
+        if not input_name:
+            return
+        def run():
+            try: self._rpc("SetInputVolume", {"inputName": input_name, "inputVolumeDb": float(db)})
+            except Exception: pass
+        threading.Thread(target=run, daemon=True).start()
+
+    def set_muted_async(self, input_name, muted):
+        if not input_name:
+            return
+        def run():
+            try: self._rpc("SetInputMute", {"inputName": input_name, "inputMuted": bool(muted)})
+            except Exception: pass
+        threading.Thread(target=run, daemon=True).start()
+
+    def set_input_device_async(self, input_name, device_id):
+        if not input_name:
+            return
+        def run():
+            try: self._rpc("SetInputSettings", {"inputName": input_name,
+                            "inputSettings": {"device_id": device_id}, "overlay": True})
+            except Exception: pass
+        threading.Thread(target=run, daemon=True).start()
 
     def toggle_stream_async(self):
         """非同步切換直播(不卡輸出迴圈);結果反映在 self.streaming/connected。"""
@@ -1227,6 +1316,68 @@ def _obs_profile_service_path():
             else os.path.expanduser("~/Library/Application Support"))
     return os.path.join(base, "obs-studio", "basic", "profiles", "Prime Stage 直式", "service.json")
 
+def _devices_json_path():
+    base = (os.environ.get("APPDATA", "") if sys.platform == "win32"
+            else os.path.expanduser("~/Library/Application Support"))
+    return os.path.join(base, "PrimeStage", "devices.json")
+
+def _load_devices():
+    try:
+        return json.load(open(_devices_json_path(), encoding="utf-8"))
+    except Exception:
+        return {}
+
+def _save_devices(dd):
+    try:
+        p = _devices_json_path()
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        json.dump(dd, open(p, "w", encoding="utf-8"), ensure_ascii=False)
+        return True
+    except Exception:
+        return False
+
+# 音量滑桿 <-> dB 對照(範圍 -40dB ~ +6dB;0dB≈右側 0.87)
+def _db_to_pos(db):
+    return max(0.0, min(1.0, (float(db) + 40.0) / 46.0))
+def _pos_to_db(p):
+    return -40.0 + max(0.0, min(1.0, float(p))) * 46.0
+
+def _prompt_choose(title, prompt, items):
+    """跳原生清單選擇框(Win=WinForms 下拉、mac=osascript choose from list);回傳選中字串或 ''。"""
+    if not items:
+        return ""
+    try:
+        import subprocess
+        if sys.platform == "win32":
+            arr = "@(" + ",".join("'" + i.replace("'", "''") + "'" for i in items) + ")"
+            ps = (
+                "Add-Type -AssemblyName System.Windows.Forms;"
+                "Add-Type -AssemblyName System.Drawing;"
+                "$items=" + arr + ";"
+                "$f=New-Object Windows.Forms.Form;$f.Text='" + title.replace("'", "''") + "';"
+                "$f.Size=New-Object Drawing.Size(440,175);$f.StartPosition='CenterScreen';$f.TopMost=$true;"
+                "$l=New-Object Windows.Forms.Label;$l.Text='" + prompt.replace("'", "''") + "';$l.SetBounds(14,14,400,20);"
+                "$c=New-Object Windows.Forms.ComboBox;$c.DropDownStyle='DropDownList';$c.SetBounds(14,44,404,24);"
+                "[void]$c.Items.AddRange($items);$c.SelectedIndex=0;"
+                "$b=New-Object Windows.Forms.Button;$b.Text='確定';$b.SetBounds(318,90,100,30);$b.DialogResult='OK';"
+                "$f.Controls.AddRange(@($l,$c,$b));$f.AcceptButton=$b;"
+                "if($f.ShowDialog() -eq 'OK'){[Console]::Out.Write([string]$c.SelectedItem)}"
+            )
+            out = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", ps],
+                                 capture_output=True, text=True, timeout=120)
+            return (out.stdout or "").strip()
+        if sys.platform == "darwin":
+            quoted = ",".join('"' + i.replace('"', '\\"') + '"' for i in items)
+            scr = ('set L to {%s}\n'
+                   'set R to (choose from list L with title "%s" with prompt "%s")\n'
+                   'if R is false then return ""\n'
+                   'return item 1 of R' % (quoted, title.replace('"', '\\"'), prompt.replace('"', '\\"')))
+            out = subprocess.run(["osascript", "-e", scr], capture_output=True, text=True, timeout=120)
+            return (out.stdout or "").strip()
+    except Exception:
+        pass
+    return ""
+
 def _prompt_key():
     """跳原生輸入框問金鑰(Win=PowerShell InputBox,mac=osascript);回傳去空白後字串或 ''。"""
     try:
@@ -1301,33 +1452,82 @@ def _write_stream_url(url):
         print("[url] 寫入失敗: %s" % e)
         return False
 
-def build_settings_panel(cam_name):
-    """設定選單:切換鏡頭 / 換金鑰 / 換推流位址。回傳 (RGBA, {item:rect(相對面板)}, 面板位置(x,y))。"""
-    PW_, PH_ = WIN_W - 60, 286
-    px, py = 30, 150
+def build_settings_panel(st):
+    """設定選單:切換鏡頭 / 選麥克風 / 麥克風音量 / 連動電腦聲音 / 電腦聲音音量 / 鏡像翻轉 / 換金鑰 / 換位址。
+    st=目前狀態(cam_name/mic_name/mic_pos/desk_pos/desk_on/has_desk/flip/loaded)。
+    回傳 (RGBA, {item:rect(相對面板)}, 面板位置(x,y))。"""
+    PW_ = WIN_W - 60
+    zhb = lambda s: _uifont("zhb", s); zh = lambda s: _uifont("zh", s)
+    has_desk = st.get("has_desk", False)
+    # 版面:先排每列 (kind, ...) 與其 y/高
+    rows = [("btn", "切換鏡頭", "目前：" + (st.get("cam_name") or "—"), "cam"),
+            ("btn", "選麥克風", "目前：" + (st.get("mic_name") or "系統預設"), "mic_dev"),
+            ("sld", "麥克風收音大小", st.get("mic_pos", 1.0), "mic_vol", True)]
+    if has_desk:
+        rows.append(("tgl", "連動電腦聲音", bool(st.get("desk_on", True)), "desk_on"))
+        rows.append(("sld", "電腦聲音大小", st.get("desk_pos", 0.5), "desk_vol", bool(st.get("desk_on", True))))
+    rows.append(("tgl", "鏡像翻轉(觀眾端)", bool(st.get("flip", True)), "flip"))
+    rows.append(("btn", "換直播金鑰", "", "key"))
+    rows.append(("btn", "換推流位址", "", "url"))
+    laid = []
+    y = 44
+    for r in rows:
+        h = 50 if r[0] == "sld" else 44
+        laid.append((y, h, r)); y += h + 8
+    close_y = y
+    PH_ = close_y + 44 + 12
+    px = 30
+    py = max(56, (WIN_H - PH_) // 2)
     im = PILImage.new("RGBA", (PW_, PH_), (0, 0, 0, 0))
     d = PILDraw.Draw(im)
-    d.rounded_rectangle([0, 0, PW_ - 1, PH_ - 1], radius=18, fill=(24, 24, 32, 245), outline=(80, 84, 96, 255), width=2)
-    zhb = lambda s: _uifont("zhb", s); zh = lambda s: _uifont("zh", s)
+    d.rounded_rectangle([0, 0, PW_ - 1, PH_ - 1], radius=18, fill=(24, 24, 32, 247), outline=(80, 84, 96, 255), width=2)
     d.text((PW_ // 2, 22), "設定", font=zhb(18), fill=(240, 200, 120, 255), anchor="mm")
+    if not st.get("loaded", False):
+        d.text((PW_ - 24, 22), "讀取中…", font=zh(11), fill=(170, 175, 185, 255), anchor="rm")
     rects = {}
-    # 切換鏡頭
-    d.rounded_rectangle([20, 46, PW_ - 20, 96], radius=12, fill=(58, 62, 74, 255))
-    d.text((PW_ // 2, 62), "切換鏡頭", font=zhb(16), fill=(255, 255, 255, 255), anchor="mm")
-    d.text((PW_ // 2, 82), "目前：" + (cam_name or "—"), font=zh(11), fill=(190, 195, 205, 255), anchor="mm")
-    rects["cam"] = (20, 46, PW_ - 20, 96)
-    # 換金鑰
-    d.rounded_rectangle([20, 106, PW_ - 20, 146], radius=12, fill=(58, 62, 74, 255))
-    d.text((PW_ // 2, 126), "換直播金鑰", font=zhb(16), fill=(255, 255, 255, 255), anchor="mm")
-    rects["key"] = (20, 106, PW_ - 20, 146)
-    # 換推流位址
-    d.rounded_rectangle([20, 156, PW_ - 20, 196], radius=12, fill=(58, 62, 74, 255))
-    d.text((PW_ // 2, 176), "換推流位址", font=zhb(16), fill=(255, 255, 255, 255), anchor="mm")
-    rects["url"] = (20, 156, PW_ - 20, 196)
-    # 關閉
-    d.rounded_rectangle([20, 210, PW_ - 20, 250], radius=12, fill=(44, 46, 56, 255))
-    d.text((PW_ // 2, 230), "關閉", font=zhb(15), fill=(220, 222, 228, 255), anchor="mm")
-    rects["close"] = (20, 210, PW_ - 20, 250)
+    for (yy, hh, r) in laid:
+        kind = r[0]
+        if kind == "btn":
+            _, label, sub, key = r
+            d.rounded_rectangle([20, yy, PW_ - 20, yy + hh], radius=12, fill=(58, 62, 74, 255))
+            if sub:
+                d.text((PW_ // 2, yy + 14), label, font=zhb(15), fill=(255, 255, 255, 255), anchor="mm")
+                d.text((PW_ // 2, yy + 32), sub, font=zh(11), fill=(190, 195, 205, 255), anchor="mm")
+            else:
+                d.text((PW_ // 2, yy + hh // 2), label, font=zhb(15), fill=(255, 255, 255, 255), anchor="mm")
+            rects[key] = (20, yy, PW_ - 20, yy + hh)
+        elif kind == "tgl":
+            _, label, on, key = r
+            d.rounded_rectangle([20, yy, PW_ - 20, yy + hh], radius=12, fill=(48, 50, 60, 255))
+            d.text((36, yy + hh // 2), label, font=zhb(15), fill=(255, 255, 255, 255), anchor="lm")
+            tw_, th_ = 64, 26
+            tx1 = PW_ - 32; tx0 = tx1 - tw_; tcy = yy + hh // 2
+            d.rounded_rectangle([tx0, tcy - th_ // 2, tx1, tcy + th_ // 2], radius=13,
+                                fill=(70, 180, 110, 255) if on else (92, 94, 106, 255))
+            knob = (tx1 - 13) if on else (tx0 + 13)
+            # 文字放在膠囊「沒有旋鈕」的那一半:開→左側(綠底白字)、關→右側(灰底深字)
+            _lx = (tx0 + knob) // 2 if on else (knob + tx1) // 2
+            d.text((_lx, tcy), "開" if on else "關", font=zh(11),
+                   fill=(255, 255, 255, 255) if on else (70, 72, 80, 255), anchor="mm")
+            d.ellipse([knob - 11, tcy - 11, knob + 11, tcy + 11], fill=(245, 246, 250, 255))
+            rects[key] = (20, yy, PW_ - 20, yy + hh)
+        elif kind == "sld":
+            _, label, pos, key, enabled = r
+            base = (255, 255, 255, 255) if enabled else (140, 142, 150, 255)
+            pos = max(0.0, min(1.0, float(pos)))
+            d.text((36, yy + 13), label, font=zhb(14), fill=base, anchor="lm")
+            d.text((PW_ - 32, yy + 13), "%d%%" % int(round(pos * 100)), font=zh(12), fill=base, anchor="rm")
+            trx0, trx1 = 36, PW_ - 32; tyc = yy + 34
+            d.rounded_rectangle([trx0, tyc - 4, trx1, tyc + 4], radius=4, fill=(70, 72, 84, 255))
+            fx = trx0 + int((trx1 - trx0) * pos)
+            if enabled:
+                d.rounded_rectangle([trx0, tyc - 4, max(trx0 + 1, fx), tyc + 4], radius=4, fill=(233, 193, 122, 255))
+            d.ellipse([fx - 9, tyc - 9, fx + 9, tyc + 9], fill=(245, 246, 250, 255) if enabled else (150, 152, 160, 255))
+            # 命中矩形含左右各 6px 邊(點擊時用 rx0+6/rx1-6 還原軌道換算 pos)
+            rects[key] = (trx0 - 6, yy + 18, trx1 + 6, yy + hh)
+    d.rounded_rectangle([20, close_y, PW_ - 20, close_y + 44], radius=12, fill=(44, 46, 56, 255))
+    d.text((PW_ // 2, close_y + 22), "關閉", font=zhb(15), fill=(220, 222, 228, 255), anchor="mm")
+    rects["close"] = (20, close_y, PW_ - 20, close_y + 44)
     return _rgba(im), rects, (px, py)
 
 def build_tray(presets, thumbs, active, scroll, tw, th):
@@ -1874,7 +2074,12 @@ def main():
           "chip_rect": (WIN_W - 150, 34, WIN_W - 10, 66),
           "close_rect": (WIN_W - 38, 6, WIN_W - 8, 32), "quit": False,
           "set_rect": (WIN_W - 120, 6, WIN_W - 46, 30), "settings_open": False,
-          "cur_cam": args.camera, "do_cam_switch": False, "do_key_change": False, "do_url_change": False}
+          "cur_cam": args.camera, "do_cam_switch": False, "do_key_change": False, "do_url_change": False,
+          # 鏡像翻轉:devices.json 的偏好優先,否則吃 --flip-output 預設(觀眾端非鏡像)
+          "flip": bool(_load_devices().get("flipOutput", args.flip_output)),
+          "desk_on": True, "has_desk": (sys.platform == "win32"),
+          "mic_pos": 1.0, "desk_pos": _db_to_pos(-16.0), "mic_name_disp": "",
+          "audio_loaded": False, "_pushed_audio": False}
     strip_tw = TRAY_TW
     demo_imgs = {}
     for g, fn in (("f", "demo_female.png"), ("m", "demo_male.png")):
@@ -1911,16 +2116,27 @@ def main():
                 if ui["drag"] is not None and not ui["moved"]:
                     # 設定選單開啟時:優先處理選單點擊(其餘 UI 讓位)
                     if ui.get("settings_open"):
-                        px, py = ui.get("_set_pos", (30, 180))
+                        px, py = ui.get("_set_pos", (30, 150))
+                        hit = None
                         for k, (rx0, ry0, rx1, ry1) in ui.get("_set_rects", {}).items():
                             if px + rx0 <= x <= px + rx1 and py + ry0 <= y <= py + ry1:
-                                if k == "cam":   ui["do_cam_switch"] = True
-                                elif k == "key": ui["do_key_change"] = True
-                                elif k == "url": ui["do_url_change"] = True
-                                ui["settings_open"] = False; ui["dirty"] = True
-                                break
-                        else:
+                                hit = (k, rx0, rx1); break
+                        if hit is None:
                             ui["settings_open"] = False; ui["dirty"] = True   # 點面板外=關閉
+                        else:
+                            k = hit[0]
+                            if k in ("mic_vol", "desk_vol"):   # 滑桿:依點擊 x 換算音量,面板保持開啟即時套用
+                                trx0 = px + hit[1] + 6; trx1 = px + hit[2] - 6
+                                pos = max(0.0, min(1.0, (x - trx0) / max(1.0, float(trx1 - trx0))))
+                                ui["set_mic_pos" if k == "mic_vol" else "set_desk_pos"] = pos
+                                ui["dirty"] = True
+                            elif k == "desk_on": ui["do_desk_toggle"] = True; ui["dirty"] = True
+                            elif k == "flip":    ui["do_flip_toggle"] = True; ui["dirty"] = True
+                            elif k == "mic_dev": ui["do_mic_pick"] = True; ui["settings_open"] = False; ui["dirty"] = True
+                            elif k == "cam":     ui["do_cam_switch"] = True; ui["settings_open"] = False; ui["dirty"] = True
+                            elif k == "key":     ui["do_key_change"] = True; ui["settings_open"] = False; ui["dirty"] = True
+                            elif k == "url":     ui["do_url_change"] = True; ui["settings_open"] = False; ui["dirty"] = True
+                            elif k == "close":   ui["settings_open"] = False; ui["dirty"] = True
                         ui["drag"] = None
                         return
                     bx0, by0, bx1, by1 = ui["btn_rect"]
@@ -1930,7 +2146,8 @@ def main():
                     if qx0 <= x <= qx1 and qy0 <= y <= qy1:
                         ui["quit"] = True                # 右上 ✕:結束程式
                     elif sx0 <= x <= sx1 and sy0 <= y <= sy1:
-                        ui["settings_open"] = True; ui["dirty"] = True   # 設定鈕
+                        ui["settings_open"] = True; ui["do_load_audio"] = True
+                        ui["audio_loaded"] = False; ui["dirty"] = True   # 設定鈕(順便讀目前音訊狀態)
                     elif bx0 <= x <= bx1 and by0 <= y <= by1:
                         ui["live_toggle"] = True     # 開始/停止直播
                     elif cx0 <= x <= cx1 and cy0 <= y <= cy1:
@@ -2045,7 +2262,7 @@ def main():
 
             if last_full is not None:
                 # 只翻「送出去」的畫面（校正相機鏡像→觀眾看到正常）；預覽用未翻轉的 last_full 維持自拍視角
-                cam.send(cv2.flip(last_full, 1) if args.flip_output else last_full)
+                cam.send(cv2.flip(last_full, 1) if ui.get("flip", True) else last_full)
             cam.sleep_until_next_frame()
 
             if not args.no_window:
@@ -2064,6 +2281,72 @@ def main():
                         and thumbs_map.get("live") and thumbs_map["live"][0] is None:
                     worker.start(frame, strip_tw, strip_th, thumbs_map["live"])
                 # 開始/停止直播(遙控背景 OBS,不卡輸出)
+                # 讀取目前音訊狀態(開設定選單時;背景執行緒一次連線讀回,不卡畫面)
+                if ui.get("do_load_audio"):
+                    ui["do_load_audio"] = False
+                    def _load_audio():
+                        s = obs_ctl.read_audio_state()
+                        ui["_audio"] = s
+                        if s.get("ok"):
+                            ui["has_desk"] = s.get("desk") is not None
+                            ui["mic_pos"] = _db_to_pos(s.get("mic_db", 0.0))
+                            ui["desk_pos"] = _db_to_pos(s.get("desk_db", 0.0))
+                            ui["desk_on"] = (s.get("desk") is not None) and not s.get("desk_muted", False)
+                            ui["mic_name_disp"] = s.get("mic_dev_name", "")
+                            ui["mic_dev_list"] = s.get("mic_devices", [])
+                            ui["audio_loaded"] = True; ui["dirty"] = True
+                    threading.Thread(target=_load_audio, daemon=True).start()
+                # 連上 OBS 後把 devices.json 存的音量/連動/麥克風偏好推回 OBS(每次啟動都套,免依賴 OBS 自存設定)
+                if obs_ctl.connected and not ui.get("_pushed_audio"):
+                    ui["_pushed_audio"] = True
+                    def _push_prefs():
+                        dd = _load_devices()
+                        s = obs_ctl.read_audio_state()
+                        mic, desk = s.get("mic"), s.get("desk")
+                        if mic and "micVolDb" in dd:  obs_ctl.set_volume_async(mic, dd["micVolDb"])
+                        if mic and dd.get("micId"):   obs_ctl.set_input_device_async(mic, dd["micId"])
+                        if desk and "deskVolDb" in dd: obs_ctl.set_volume_async(desk, dd["deskVolDb"])
+                        if desk and "deskOn" in dd:    obs_ctl.set_muted_async(desk, not dd["deskOn"])
+                    threading.Thread(target=_push_prefs, daemon=True).start()
+                # 麥克風/電腦聲音音量(滑桿即時套用+記住)
+                if "set_mic_pos" in ui:
+                    ui["mic_pos"] = ui.pop("set_mic_pos")
+                    obs_ctl.set_volume_async((ui.get("_audio") or {}).get("mic"), _pos_to_db(ui["mic_pos"]))
+                    dd = _load_devices(); dd["micVolDb"] = round(_pos_to_db(ui["mic_pos"]), 2); _save_devices(dd)
+                if "set_desk_pos" in ui:
+                    ui["desk_pos"] = ui.pop("set_desk_pos")
+                    obs_ctl.set_volume_async((ui.get("_audio") or {}).get("desk"), _pos_to_db(ui["desk_pos"]))
+                    dd = _load_devices(); dd["deskVolDb"] = round(_pos_to_db(ui["desk_pos"]), 2); _save_devices(dd)
+                # 連動電腦聲音 開/關
+                if ui.get("do_desk_toggle"):
+                    ui["do_desk_toggle"] = False
+                    ui["desk_on"] = not ui.get("desk_on", True)
+                    obs_ctl.set_muted_async((ui.get("_audio") or {}).get("desk"), not ui["desk_on"])
+                    dd = _load_devices(); dd["deskOn"] = ui["desk_on"]; _save_devices(dd)
+                    ui["dirty"] = True
+                # 鏡像翻轉 開/關(引擎端,立即生效並記住)
+                if ui.get("do_flip_toggle"):
+                    ui["do_flip_toggle"] = False
+                    ui["flip"] = not ui.get("flip", True)
+                    dd = _load_devices(); dd["flipOutput"] = ui["flip"]; _save_devices(dd)
+                    ui["toast"] = ("鏡像翻轉：" + ("開(觀眾看正常)" if ui["flip"] else "關"), time.time() + 3)
+                    ui["dirty"] = True
+                # 選麥克風設備(原生下拉;與換金鑰同模式,選擇時會短暫卡住畫面)
+                if ui.get("do_mic_pick"):
+                    ui["do_mic_pick"] = False
+                    devs = ui.get("mic_dev_list") or []
+                    if devs:
+                        chosen = _prompt_choose("選麥克風", "選擇你的麥克風", [n for (n, v) in devs])
+                        if chosen:
+                            val = next((v for (n, v) in devs if n == chosen), None)
+                            if val is not None:
+                                obs_ctl.set_input_device_async((ui.get("_audio") or {}).get("mic"), val)
+                                dd = _load_devices(); dd["micId"] = val; _save_devices(dd)
+                                ui["mic_name_disp"] = chosen
+                                ui["toast"] = ("已切換麥克風：" + chosen, time.time() + 4)
+                    else:
+                        ui["toast"] = ("讀不到麥克風清單(OBS 未連上?稍等再試)", time.time() + 5)
+                    ui["dirty"] = True
                 # 切換鏡頭(熱換,不重開;開不了就跳回上一個並提示)
                 if ui.get("do_cam_switch"):
                     ui["do_cam_switch"] = False
@@ -2198,7 +2481,11 @@ def main():
                 # 設定面板(切換鏡頭/換金鑰)蓋在最上層
                 if ui.get("settings_open"):
                     cur_cam_name = cam_names[ui.get("cur_cam", 0)] if (cam_names and ui.get("cur_cam", 0) < len(cam_names)) else "—"
-                    panel, srects, spos = build_settings_panel(cur_cam_name)
+                    _sst = {"cam_name": cur_cam_name, "mic_name": ui.get("mic_name_disp", ""),
+                            "mic_pos": ui.get("mic_pos", 1.0), "desk_pos": ui.get("desk_pos", 0.5),
+                            "desk_on": ui.get("desk_on", True), "has_desk": ui.get("has_desk", sys.platform == "win32"),
+                            "flip": ui.get("flip", True), "loaded": ui.get("audio_loaded", False)}
+                    panel, srects, spos = build_settings_panel(_sst)
                     ui["_set_rects"] = srects; ui["_set_pos"] = spos
                     _alpha_paste(view, panel, spos[0], spos[1])
                 if UI_SCALE > 1.01:
