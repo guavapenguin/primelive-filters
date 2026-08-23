@@ -150,15 +150,18 @@ if ($Setup -or -not (Test-Path $profDir)) {
 # ---- ③ 啟動引擎 → 等虛擬攝影機 → 開 OBS -------------------------------------
 $readyFlag = Join-Path $env:TEMP "primelive_ready.flag"
 Remove-Item $readyFlag -Force -ErrorAction SilentlyContinue
-$engineArgs = @("--ready-file", $readyFlag)
+# 注意:Start-Process -ArgumentList 傳「陣列」時,PS 5.1 不會替含空白的元素自動加引號,
+# 相機名「OBSBOT Tiny 3 Lite StreamCamera」會被拆成多個參數→引擎 argparse 報 unrecognized 而閃退。
+# → 自己組「已加引號的單一字串」,含空白的值一律用引號包住。
+$engineArgs = "--ready-file `"$readyFlag`""
 $devFile = Join-Path $env:APPDATA "PrimeStage\devices.json"
 if (Test-Path $devFile) {
     try {
         $d = Get-Content $devFile -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($d.cameraName) { $engineArgs += @("--camera-name", "$($d.cameraName)"); Note "攝影機用你選的:$($d.cameraName)" }
+        if ($d.cameraName) { $engineArgs += " --camera-name `"$($d.cameraName)`""; Note "攝影機用你選的:$($d.cameraName)" }
     } catch {}
 }
-if ($Fast) { $engineArgs += "--fast" }
+if ($Fast) { $engineArgs += " --fast" }
 
 Note "啟動濾鏡引擎:$engineExe"
 Start-Process -FilePath $engineExe -ArgumentList $engineArgs -WorkingDirectory (Split-Path -Parent $engineExe) | Out-Null
@@ -181,8 +184,8 @@ if (Get-Process obs64 -ErrorAction SilentlyContinue) {
     $sent = Join-Path $env:APPDATA "obs-studio\.sentinel"
     if (Test-Path $sent) { try { [System.IO.Directory]::Delete($sent, $true) } catch {} }
     # --profile/--collection 直接指定,不受 user.ini 初始化狀態影響;--minimize-to-tray 藏起 OBS
-    Start-Process -FilePath $obsExe -WorkingDirectory (Split-Path -Parent $obsExe) `
-        -ArgumentList '--profile','Prime Stage 直式','--collection','Prime Stage 直式','--minimize-to-tray','--disable-shutdown-check',
-                      '--websocket_port','4455','--websocket_password',$wsPwd | Out-Null
+    # 同樣用「已加引號的單一字串」,避免含空白的 profile 名「Prime Stage 直式」被拆開
+    $obsArgs = "--profile `"Prime Stage 直式`" --collection `"Prime Stage 直式`" --minimize-to-tray --disable-shutdown-check --websocket_port 4455 --websocket_password `"$wsPwd`""
+    Start-Process -FilePath $obsExe -WorkingDirectory (Split-Path -Parent $obsExe) -ArgumentList $obsArgs | Out-Null
 }
 Note "完成。引擎視窗滾輪選濾鏡;OBS 按「開始串流」後回平台「確認開播」。"
