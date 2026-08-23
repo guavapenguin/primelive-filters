@@ -1466,7 +1466,7 @@ def build_settings_panel(st):
     if has_desk:
         rows.append(("tgl", "連動電腦聲音", bool(st.get("desk_on", True)), "desk_on"))
         rows.append(("sld", "電腦聲音大小", st.get("desk_pos", 0.5), "desk_vol", bool(st.get("desk_on", True))))
-    rows.append(("tgl", "鏡像翻轉(觀眾端)", bool(st.get("flip", True)), "flip"))
+    rows.append(("tgl", "左右翻轉(照鏡子)", bool(st.get("flip", True)), "flip"))
     rows.append(("btn", "換直播金鑰", "", "key"))
     rows.append(("btn", "換推流位址", "", "url"))
     laid = []
@@ -2329,7 +2329,7 @@ def main():
                     ui["do_flip_toggle"] = False
                     ui["flip"] = not ui.get("flip", True)
                     dd = _load_devices(); dd["flipOutput"] = ui["flip"]; _save_devices(dd)
-                    ui["toast"] = ("鏡像翻轉：" + ("開(觀眾看正常)" if ui["flip"] else "關"), time.time() + 3)
+                    ui["toast"] = ("左右翻轉：" + ("開" if ui["flip"] else "關") + "(調到抬右手螢幕同邊)", time.time() + 3)
                     ui["dirty"] = True
                 # 選麥克風設備(原生下拉;與換金鑰同模式,選擇時會短暫卡住畫面)
                 if ui.get("do_mic_pick"):
@@ -2443,7 +2443,10 @@ def main():
                 tv = max(0.0, min(1.0, ui["tray_vis"]))
                 # 每格合成:直式畫面全幅 + 半透明浮層
                 if last_full is not None:
-                    view = cv2.resize(cv2.cvtColor(last_full, cv2.COLOR_RGB2BGR), (WIN_W, WIN_H))
+                    # 主播預覽=「送出去畫面」的鏡像(照鏡子:抬右手→螢幕同邊)。
+                    # 送出去= flip(last_full) if flip else last_full → 預覽= flip(送出去)= 反過來:
+                    _pv = last_full if ui.get("flip", True) else cv2.flip(last_full, 1)
+                    view = cv2.resize(cv2.cvtColor(_pv, cv2.COLOR_RGB2BGR), (WIN_W, WIN_H))
                 else:
                     view = np.full((WIN_H, WIN_W, 3), 16, np.uint8)
                 if ui.get("_top") is not None:
