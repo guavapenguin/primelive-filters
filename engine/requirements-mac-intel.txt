@@ -1,0 +1,9 @@
+# macOS Intel(x86_64)專用相依。
+# mediapipe 0.10.35 只有 arm64-mac wheel;Intel-mac 最後一個有 wheel 的是 0.10.21(tasks API 相同)。
+# 其餘不硬釘版本,讓 pip 依 0.10.21 的約束自動挑相容的 Intel wheel,避免版本衝突。
+mediapipe==0.10.21
+opencv-python
+numpy
+pillow
+pyvirtualcam
+websocket-client

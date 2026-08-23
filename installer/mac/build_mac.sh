@@ -15,7 +15,16 @@ echo "[1/4] venv + 依賴($($PY --version))..."
 cd "$ENG"
 [ -d .venv-mac ] || "$PY" -m venv .venv-mac
 ./.venv-mac/bin/pip install -q --upgrade pip
-./.venv-mac/bin/pip install -q -r requirements.txt pyinstaller
+# 依打包主機架構選相依與 OBS:arm64=Apple(mediapipe 0.10.35);x86_64=Intel(mediapipe 最後有 Intel wheel 的 0.10.21)
+if [ "$(uname -m)" = "arm64" ]; then
+  REQ="requirements.txt"
+  OBS_DL="https://github.com/obsproject/obs-studio/releases/download/32.1.2/OBS-Studio-32.1.2-macOS-Apple.dmg"
+else
+  REQ="requirements-mac-intel.txt"
+  OBS_DL="https://github.com/obsproject/obs-studio/releases/download/32.1.2/OBS-Studio-32.1.2-macOS-Intel.dmg"
+fi
+echo "[arch] $(uname -m) → REQ=$REQ"
+./.venv-mac/bin/pip install -q -r "$REQ" pyinstaller
 
 echo "[2/4] PyInstaller 打包(.app 視窗模式)..."
 ./.venv-mac/bin/pyinstaller --noconfirm --onedir --windowed --name primelive_filter \
@@ -69,9 +78,8 @@ bash "$HERE/setup_mac.sh"
 osascript -e 'display dialog "金鑰已更新。之後點「開始直播（點我）」即可。" buttons {"好"} default button 1 with title "primelive"' >/dev/null 2>&1 || true
 EOF2
 chmod +x "$STAGE/開始直播（點我）.command" "$STAGE/設定金鑰（換金鑰時點我）.command" "$STAGE/setup_mac.sh"
-# 內附 OBS 官方安裝檔(Apple Silicon;Intel 機器會自動改抓官方 Intel 版)
-curl -sL --retry 3 -o "$STAGE/OBS-Studio.dmg" \
-  "https://github.com/obsproject/obs-studio/releases/download/32.1.2/OBS-Studio-32.1.2-macOS-Apple.dmg"
+# 內附 OBS 官方安裝檔(依打包主機架構:arm64=Apple、x86_64=Intel;與引擎架構一致)
+curl -sL --retry 3 -o "$STAGE/OBS-Studio.dmg" "$OBS_DL"
 cat > "$STAGE/先看我（4步驟）.txt" <<'EOF'
 primelive 直播  ─  4 步驟
 

@@ -8,10 +8,15 @@ name: build-mac
 #   APPLE_TEAM_ID        Team ID(developer.apple.com 帳號頁)
 on:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: 'macos-14 = Apple Silicon(arm64) / macos-13 = Intel(x86_64)'
+        default: macos-14
+        type: string
 
 jobs:
   build:
-    runs-on: macos-14   # Apple Silicon
+    runs-on: ${{ inputs.runner || 'macos-14' }}   # arm64=macos-14 / x86_64=macos-13
     timeout-minutes: 60
     env:
       SIGN: ${{ secrets.MAC_CERT_P12_BASE64 != '' && 'true' || 'false' }}
