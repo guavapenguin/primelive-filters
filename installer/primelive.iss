@@ -49,9 +49,17 @@ Filename: "{tmp}\OBS-Studio-Installer.exe"; Parameters: "/S"; StatusMsg: "正在
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\primestage\golive.ps1"""; Description: "立即開播（第一次會先選設備、貼串流金鑰）"; Flags: postinstall nowait skipifsilent
 
 [Code]
-// 只有在缺 OBS(找不到 obs64.exe)時才裝 OBS;健康的 OBS 不重裝
+// 完整的 OBS = obs64.exe 且 en-US.ini(資料夾完整)都在。
+// 只驗 obs64.exe 會漏掉「exe 在但 data/locale 不齊」的半殘裝→開 OBS 報「找不到 en-US.ini」。
+function ObsHealthy(base: String): Boolean;
+begin
+  Result := FileExists(base + '\bin\64bit\obs64.exe')
+        and FileExists(base + '\data\obs-studio\locale\en-US.ini');
+end;
+
+// 需要裝 OBS = 兩個路徑都沒有「完整」的 OBS(半殘也算沒有→cleanup 已先清掉,這裡補裝)
 function NeedInstallObs(): Boolean;
 begin
-  Result := (not FileExists(ExpandConstant('{commonpf}\obs-studio\bin\64bit\obs64.exe')))
-        and (not FileExists(ExpandConstant('{commonpf32}\obs-studio\bin\64bit\obs64.exe')));
+  Result := (not ObsHealthy(ExpandConstant('{commonpf}\obs-studio')))
+        and (not ObsHealthy(ExpandConstant('{commonpf32}\obs-studio')));
 end;

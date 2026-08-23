@@ -55,9 +55,12 @@ function Hide-Progress {
 }
 
 function Find-Obs {
-    @("$env:ProgramFiles\obs-studio\bin\64bit\obs64.exe",
-      "${env:ProgramFiles(x86)}\obs-studio\bin\64bit\obs64.exe") |
-      Where-Object { Test-Path $_ } | Select-Object -First 1
+    # 只認「完整」的 OBS:obs64.exe 且 en-US.ini(資料夾完整)都在。
+    # 光有 obs64.exe 但缺語系檔=半殘(開 OBS 會報「找不到 en-US.ini」)→當作沒裝,觸發清理+重裝修復。
+    @("$env:ProgramFiles\obs-studio", "${env:ProgramFiles(x86)}\obs-studio") |
+      Where-Object { (Test-Path (Join-Path $_ "bin\64bit\obs64.exe")) -and
+                     (Test-Path (Join-Path $_ "data\obs-studio\locale\en-US.ini")) } |
+      ForEach-Object { Join-Path $_ "bin\64bit\obs64.exe" } | Select-Object -First 1
 }
 function Find-Engine {
     @($EnginePath,

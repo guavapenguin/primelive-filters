@@ -34,10 +34,13 @@ if (-not $KeepConfig) {
 #    (盲目重裝健康 OBS 會在相機被佔用時把它弄壞,反而製造問題)
 foreach ($base in $obsBases) {
     if (-not (Test-Path $base)) { continue }
-    $healthy = Test-Path (Join-Path $base "bin\64bit\obs64.exe")
-    if ($healthy) { Note "OBS 正常,保留不動。"; continue }
+    # 健康 = obs64.exe 且 en-US.ini(資料夾完整)。只驗 obs64.exe 會漏掉
+    #   「exe 在但 data/locale 不齊」→ 開 OBS 報「找不到 en-US.ini」,所以兩個都要在。
+    $hasExe    = Test-Path (Join-Path $base "bin\64bit\obs64.exe")
+    $hasLocale = Test-Path (Join-Path $base "data\obs-studio\locale\en-US.ini")
+    if ($hasExe -and $hasLocale) { Note "OBS 正常,保留不動。"; continue }
 
-    Note "偵測到半殘 OBS,徹底清除..."
+    Note ("偵測到半殘 OBS(obs64.exe={0} / en-US.ini={1}),徹底清除..." -f $hasExe, $hasLocale)
     # 2a. 反註冊卡住的虛擬相機 DLL
     foreach ($dll in @("$base\data\obs-plugins\win-dshow\obs-virtualcam-module64.dll",
                        "$base\data\obs-plugins\win-dshow\obs-virtualcam-module32.dll")) {
