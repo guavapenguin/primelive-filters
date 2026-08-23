@@ -2521,28 +2521,44 @@ def main():
                       % (n, faces, n / max(1e-6, time.time() - t0), adap.scale))
                 break
     finally:
-        # 收尾:直播中先停止,再請 OBS 優雅關閉(不留背景程序)
+        # 收尾順序很重要:①直播中先停播 ②把 OBS「完全關掉並等它真的退出」 ③最後才釋放虛擬相機。
+        #   若 OBS 還在讀「OBS Virtual Camera」時就把來源(虛擬相機)抽掉,win-dshow 會崩潰
+        #   → 跳「OBS has crashed」。且 Windows 因 MinimizeToTray,taskkill 不加 /F 只會縮到系統匣不會關,
+        #   所以直接 /F 強制關(設定由 devices.json 管理+開播自動套回,不靠 OBS 自存),不管 websocket 有沒有連上都關。
         try:
-            if 'obs_ctl' in locals() and obs_ctl.connected:
-                if obs_ctl.streaming:
-                    try: obs_ctl._rpc("StopStream")
-                    except Exception: pass
-                try:
-                    import subprocess as _sp
-                    if sys.platform == "darwin":
-                        _sp.Popen(["osascript", "-e", 'quit app "OBS"'])
-                    elif sys.platform == "win32":
-                        _sp.Popen(["taskkill", "/IM", "obs64.exe"], creationflags=0x08000000)
-                except Exception:
-                    pass
+            if 'obs_ctl' in locals() and obs_ctl.connected and obs_ctl.streaming:
+                try: obs_ctl._rpc("StopStream")
+                except Exception: pass
         except Exception:
             pass
-        cam.close()
+        try:
+            import subprocess as _sp
+            if sys.platform == "darwin":
+                _sp.run(["osascript", "-e", 'quit app "OBS"'], capture_output=True, timeout=8)
+                for _ in range(25):
+                    if _sp.run(["pgrep", "-x", "OBS"], capture_output=True).returncode != 0: break
+                    time.sleep(0.2)
+                if _sp.run(["pgrep", "-x", "OBS"], capture_output=True).returncode == 0:
+                    _sp.run(["pkill", "-9", "-x", "OBS"], capture_output=True)   # 沒退乾淨再強制
+            elif sys.platform == "win32":
+                _sp.run(["taskkill", "/IM", "obs64.exe", "/F", "/T"], capture_output=True, creationflags=0x08000000)
+                for _ in range(25):   # 等 OBS 真的退出(最多 ~5 秒)再釋放虛擬相機,避免崩潰
+                    out = _sp.run(["tasklist", "/FI", "IMAGENAME eq obs64.exe"],
+                                  capture_output=True, text=True).stdout
+                    if "obs64.exe" not in out: break
+                    time.sleep(0.2)
+        except Exception:
+            pass
+        try: cam.close()                       # OBS 已退出後才釋放虛擬相機
+        except Exception: pass
         if threaded and reader is not None:
-            reader.stop()
+            try: reader.stop()
+            except Exception: pass
         elif cap is not None:
-            cap.release()
-        cv2.destroyAllWindows()
+            try: cap.release()
+            except Exception: pass
+        try: cv2.destroyAllWindows()
+        except Exception: pass
 
 
 if __name__ == "__main__":
