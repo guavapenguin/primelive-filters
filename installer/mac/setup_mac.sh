@@ -9,8 +9,9 @@ KEY="${1:-}"
 SERVER="${PRIMESTAGE_SERVER:-rtmps://af36b0817398.global-contribute.live-video.net:443/app/}"
 PROFILE="Prime Stage 直式"
 BASEW=720; BASEH=1280; FPS=30; VBITRATE=2500; ABITRATE=160
-# Apple VT 硬體編碼器 id(需在 Mac 實測;不行改 obs_x264)
-ENCODER_ID="${PRIMESTAGE_ENCODER:-com.apple.videotoolbox.videoencoder.ave.avc}"
+# 編碼器:x264 軟體(最可靠,任何 Mac 都有;720p@2500k CPU 負擔極小)。
+# Apple VT 硬體編碼器 id 在部分 OBS 版本會「Starting output failed」,故不用。
+ENCODER_ID="${PRIMESTAGE_ENCODER:-obs_x264}"
 
 OBS_ROOT="$HOME/Library/Application Support/obs-studio"
 PS_DIR="$HOME/Library/Application Support/PrimeStage"
@@ -71,7 +72,7 @@ ChannelSetup=Stereo
 EOF
 
 cat > "$PROF_DIR/streamEncoder.json" <<EOF
-{ "bitrate": $VBITRATE, "rate_control": "CBR", "keyint_sec": 2, "profile": "baseline", "bframes": false }
+{ "bitrate": $VBITRATE, "rate_control": "CBR", "keyint_sec": 2, "profile": "baseline", "preset": "veryfast", "bframes": false }
 EOF
 
 cat > "$PROF_DIR/service.json" <<EOF
