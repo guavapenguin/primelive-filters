@@ -1636,7 +1636,7 @@ def pick_camera_index(names, prefer=None, allow_phone=False):
         return None, None
     if prefer:
         for i, n in enumerate(names):
-            if prefer.lower() in n.lower() and (allow_phone or not _is_phone(n)):
+            if prefer.lower() in n.lower():          # 明確指定的名稱最優先,連手機/Camo/iPhone 也放行
                 return i, n
     for i, n in enumerate(names):
         if any(p in n.lower() for p in _PREFER_PAT):
@@ -1977,15 +1977,17 @@ def main():
             print("[警告] 指定的 camera %d 是手機(%s)，改自動選 OBSBOT(要用手機請加 --allow-phone)" % (target, cam_names[target]))
             target = -1
     if target is None or target < 0:
-        idx, nm = pick_camera_index(cam_names, args.camera_name, allow_phone=args.allow_phone)
+        prefer = _load_devices().get("cameraName") or args.camera_name   # 上次手動選的鏡頭(含 Camo/iPhone)優先
+        idx, nm = pick_camera_index(cam_names, prefer, allow_phone=args.allow_phone)
         target = idx if idx is not None else 0
         if nm:
             print("[ok] 自動選用鏡頭 %d：%s" % (target, nm))
     args.camera = target
 
-    # 可切換的實體鏡頭清單(排除虛擬相機;手機除非 --allow-phone)＝視窗「切換鏡頭」用
+    # 可切換的鏡頭清單＝視窗「切換鏡頭」用:只排除引擎自己的輸出(OBS Virtual Camera,選它會鏡中鏡),
+    # 其餘全放行(OBSBOT / 筆電 / iPhone via Camo / DroidCam…),讓使用者手動切得到 Camo。
     cam_choices = [i for i, n in enumerate(cam_names or [])
-                   if "virtual" not in n.lower() and (args.allow_phone or not _is_phone(n))]
+                   if "obs virtual camera" not in n.lower()]
     if target not in cam_choices and not args.fake_camera:
         cam_choices = ([target] + cam_choices) if cam_names else cam_choices
 
