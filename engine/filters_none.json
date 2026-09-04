@@ -1,0 +1,10 @@
+{
+ "presets": [
+  {
+   "key": "1",
+   "name": "原始",
+   "en": "Original",
+   "cat": "basic"
+  }
+ ]
+}

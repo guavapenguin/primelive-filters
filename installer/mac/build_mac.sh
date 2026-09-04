@@ -33,7 +33,8 @@ echo "[2/4] PyInstaller 打包(.app 視窗模式)..."
 APP="$ENG/dist/primelive_filter.app"
 RES="$APP/Contents/MacOS"
 echo "[3/4] 複製模型/設定/素材進 .app..."
-cp "$ENG/face_landmarker.task" "$ENG/selfie_segmenter.task" "$ENG/filters.json" "$RES/"
+cp "$ENG/face_landmarker.task" "$ENG/selfie_segmenter.task" "$RES/"
+cp "$ENG/${PRIMELIVE_FILTERS_FILE:-filters.json}" "$RES/filters.json"   # 濾鏡檔可切換(filters_none.json=無濾鏡版)
 cp -R "$ASSETS" "$RES/assets"
 
 # macOS 相機/麥克風權限:Info.plist 必須有用途說明,否則 TCC 不跳詢問直接 kill(=「未預期地結束」)

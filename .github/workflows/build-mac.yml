@@ -10,6 +10,10 @@ on:
         description: 'arm64 = Apple Silicon 原生 / x86_64 = Intel(Rosetta 打包)'
         default: arm64
         type: string
+      filters:
+        description: 'full = 全部濾鏡 / none = 無濾鏡(passthrough,美顏交給硬體/Camo)'
+        default: full
+        type: string
 
 jobs:
   build:
@@ -57,6 +61,8 @@ jobs:
         env:
           SIGN_IDENTITY: ${{ env.SIGN_IDENTITY }}
         run: |
+          export PRIMELIVE_FILTERS_FILE=$([ "${{ inputs.filters }}" = "none" ] && echo filters_none.json || echo filters.json)
+          echo "filters file = $PRIMELIVE_FILTERS_FILE"
           if [ "$TARGET" = "x86_64" ]; then
             export PYTHON="$PY_X64"
             arch -x86_64 bash installer/mac/build_mac.sh

@@ -15,6 +15,7 @@ Write-Host "[3/3] 複製模型 / 設定 / 素材到 exe 旁..."
 $dist = Join-Path $eng "dist\primelive_filter"
 Copy-Item (Join-Path $eng "face_landmarker.task")  $dist -Force
 Copy-Item (Join-Path $eng "selfie_segmenter.task") $dist -Force
-Copy-Item (Join-Path $eng "filters.json")          $dist -Force
+$filtersFile = if ($env:PRIMELIVE_FILTERS_FILE) { $env:PRIMELIVE_FILTERS_FILE } else { "filters.json" }
+Copy-Item (Join-Path $eng $filtersFile) (Join-Path $dist "filters.json") -Force   # 濾鏡檔可切換(filters_none.json=無濾鏡版)
 Copy-Item (Join-Path (Split-Path $eng) "assets")   (Join-Path $dist "assets") -Recurse -Force
 Write-Host "完成 -> $dist\primelive_filter.exe"
